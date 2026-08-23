@@ -1,0 +1,11 @@
+# dsh-scheduler bundle patch
+#
+# Installed through:
+#   dsh plugin --profile <name> add dsh-scheduler
+#
+# The command appends `dsh-scheduler` to the profile's dsh.profile.bundles
+# stack; the profile boot then merges THIS patch (a single insert of the
+# plugin row) exactly like a manual cordis.patch.yml mount line.
+- insert:
+    - id: dsh-scheduler
+      name: 'dsh-scheduler'
