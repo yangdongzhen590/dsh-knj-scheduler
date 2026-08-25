@@ -67,12 +67,43 @@ export async function executeTask(ctx: Context, task: TaskDef): Promise<ExecuteR
       source: { kind: 'plugin', plugin: 'dsh-scheduler' },
     })
     agent.followup(message)
-    return { status: 'created', sessionId: String(agent.id), ms: Date.now() - started }
+    const sessionIdOut = String(agent.id)
+    // The low-level agents.create path does not register the new session with
+    // the host workspace registry (the high-level session.create flow does),
+    // so a session with a task-configured cwd would otherwise show under
+    // "unassigned" in the session tree. Attach it explicitly — best-effort,
+    // a registration hiccup must never fail the execution itself.
+    if (task.cwd !== undefined) {
+      await attachToWorkspace(ctx, task.cwd, sessionIdOut)
+    }
+    return { status: 'created', sessionId: sessionIdOut, ms: Date.now() - started }
   } catch (error) {
     return {
       status: 'failed',
       ms: Date.now() - started,
       error: error instanceof Error ? error.message : String(error),
     }
+  }
+}
+
+/** Structural subset of the host workspace registry (see dsh-workspace). */
+interface WorkspaceRegistryLike {
+  resolveByPath?(path: string): Promise<{ attachSession(sessionId: string): Promise<void> } | undefined> | { attachSession(sessionId: string): Promise<void> } | undefined
+}
+
+/**
+ * Register a freshly created session with the workspace whose path matches
+ * `cwd`, so the session tree groups it under that workspace. Never throws:
+ * failures are logged and the execution result is unaffected.
+ */
+async function attachToWorkspace(ctx: Context, cwd: string, sessionId: string): Promise<void> {
+  try {
+    const registry = ctx.get('workspaceRegistry') as WorkspaceRegistryLike | undefined
+    if (registry === undefined || typeof registry.resolveByPath !== 'function') return
+    const workspace = await registry.resolveByPath(cwd)
+    if (workspace === undefined) return
+    await workspace.attachSession(sessionId)
+  } catch (error) {
+    console.error('[dsh-scheduler] 会话挂载到工作区失败（不影响执行）:', error)
   }
 }
