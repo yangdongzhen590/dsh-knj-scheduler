@@ -14,9 +14,10 @@ Scheduled tasks for DeepSeek Harness — create a new session with your prompt o
 ## 安装
 
 ```sh
-dsh plugin --profile web add github:yangdongzhen590/dsh-knj-scheduler
+dsh plugin --profile web add dsh-scheduler
 ```
 
+> npm 包 [`dsh-scheduler`](https://www.npmjs.com/package/dsh-scheduler)，源码仓库 [dsh-knj-scheduler](https://github.com/yangdongzhen590/dsh-knj-scheduler)。
 > 入口菜单由 [dsh-knj-menu](https://github.com/yangdongzhen590/dsh-knj-menu) 提供，未安装时请一并安装。
 
 ## 使用
