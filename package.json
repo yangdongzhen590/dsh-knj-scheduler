@@ -1,6 +1,6 @@
 {
   "name": "dsh-scheduler",
-  "version": "2026.8.251",
+  "version": "2026.9.10",
   "description": "定时任务调度器：按 Cron 自动新建 DSH 会话并注入提示词执行。Scheduled tasks for DeepSeek Harness: create a new session with your prompt on a cron schedule.",
   "type": "module",
   "main": "lib/index.js",
