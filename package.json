@@ -29,9 +29,10 @@
     },
     "client": {
       "inject": [
-        "@deepseek-ai/dsh-client-runtime",
-        "@deepseek-ai/dsh-client-locale",
-        "@deepseek-ai/dsh-client-ui-slots"
+        "locale",
+        "slots",
+        "sessions",
+        "workspaces"
       ],
       "platform": "web"
     }
@@ -53,7 +54,8 @@
     "LICENSE"
   ],
   "dependencies": {
-    "croner": "^9.0.0"
+    "croner": "^9.0.0",
+    "dsh-knj-menu": "^2026.9.10"
   },
   "peerDependencies": {
     "@deepseek-ai/cordis": "^4.0.1",
