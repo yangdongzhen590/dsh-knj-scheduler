@@ -43,6 +43,7 @@ export function mountSchedulerRoutes(
       store.updateHistory(id, {
         status: result.status,
         sessionId: result.sessionId,
+        workflowTaskId: result.workflowTaskId,
         ms: result.ms,
         error: result.error,
       })
@@ -104,6 +105,16 @@ export function mountSchedulerRoutes(
         return
       }
 
+      if (path === `${BASE}/workflows` && method === 'GET') {
+        const workflow = ctx.get('knjWorkflowScheduler') as { listWorkflows?: () => Promise<unknown[]> } | undefined
+        if (workflow === undefined || typeof workflow.listWorkflows !== 'function') {
+          sendJson(response, 503, { error: 'dsh-knj-workflow scheduler service is unavailable' })
+          return
+        }
+        sendJson(response, 200, { workflows: await workflow.listWorkflows() })
+        return
+      }
+
       if (path === `${BASE}/tasks`) {
         if (method === 'GET') {
           const tasks = store.list().map((task) => ({
@@ -154,6 +165,7 @@ export function mountSchedulerRoutes(
           store.updateHistory(id, {
             status: result.status,
             sessionId: result.sessionId,
+            workflowTaskId: result.workflowTaskId,
             ms: result.ms,
             error: result.error,
           })

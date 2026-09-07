@@ -19,6 +19,8 @@ export async function api<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 export type TaskType = 'cron' | 'once' | 'interval'
+export type ExecutionKind = 'prompt-session' | 'knj-workflow'
+export interface WorkflowChoice { id: string; name: string; revision?: number }
 
 export interface TaskView {
   id: string
@@ -29,7 +31,12 @@ export interface TaskView {
   runAt?: string
   everyMinutes?: number
   cwd?: string
-  prompt: string
+  executionKind: ExecutionKind
+  prompt?: string
+  workflowId?: string
+  workflowTitle?: string
+  workflowDescription?: string
+  workflowStoryCode?: string
   createdAt: string
   updatedAt: string
   nextRun: string | null
@@ -42,7 +49,12 @@ export interface TaskInput {
   runAt?: string
   everyMinutes?: number
   cwd?: string
-  prompt: string
+  executionKind?: ExecutionKind
+  prompt?: string
+  workflowId?: string
+  workflowTitle?: string
+  workflowDescription?: string
+  workflowStoryCode?: string
   enabled?: boolean
 }
 
@@ -52,12 +64,17 @@ export interface HistoryEntry {
   at: string
   status: 'running' | 'created' | 'failed' | 'skipped'
   sessionId?: string
+  workflowTaskId?: string
   ms?: number
   error?: string
 }
 
 export function listTasks(): Promise<{ tasks: TaskView[] }> {
   return api('/dsh-scheduler/tasks')
+}
+
+export function listWorkflows(): Promise<{ workflows: WorkflowChoice[] }> {
+  return api('/dsh-scheduler/workflows')
 }
 
 export function createTask(input: TaskInput): Promise<{ ok: boolean; task: TaskView }> {
@@ -76,7 +93,7 @@ export function toggleTask(id: string, enabled: boolean): Promise<{ ok: boolean;
   return api(`/dsh-scheduler/tasks/${encodeURIComponent(id)}/toggle`, { method: 'POST', body: JSON.stringify({ enabled }) })
 }
 
-export function runTask(id: string): Promise<{ ok: boolean; result: { status: string; sessionId?: string; error?: string } }> {
+export function runTask(id: string): Promise<{ ok: boolean; result: { status: string; sessionId?: string; workflowTaskId?: string; error?: string } }> {
   return api(`/dsh-scheduler/tasks/${encodeURIComponent(id)}/run`, { method: 'POST' })
 }
 

@@ -9,7 +9,7 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import type { Dict } from './locales.ts'
 import * as api from './api.ts'
-import type { HistoryEntry, TaskInput, TaskType, TaskView } from './api.ts'
+import type { ExecutionKind, HistoryEntry, TaskInput, TaskType, TaskView, WorkflowChoice } from './api.ts'
 import { IconCheck, IconChevronLeft, IconClock, IconCross, IconEdit, IconHistory, IconPlay, IconPlus, IconRefresh, IconTrash } from './icons.tsx'
 import { PAGE_SIZES, pageSlice, fmt } from './pager.ts'
 import type { SessionsService, WorkspacesService } from './index.ts'
@@ -142,6 +142,8 @@ export function SchedulerPanel({ onClose, t, sessions, workspaces }: SchedulerPa
   const [history, setHistory] = useState<HistoryEntry[]>([])
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
+  const [runningTaskId, setRunningTaskId] = useState<string | null>(null)
+  const [runNotice, setRunNotice] = useState<{ message: string; workflowTaskId?: string } | null>(null)
   const [editId, setEditId] = useState<string | null>(null)
   const [name, setName] = useState('')
   const [type, setType] = useState<TaskType>('cron')
@@ -149,6 +151,12 @@ export function SchedulerPanel({ onClose, t, sessions, workspaces }: SchedulerPa
   const [runAt, setRunAt] = useState('') // datetime-local (local)
   const [everyMinutes, setEveryMinutes] = useState(60)
   const [prompt, setPrompt] = useState('')
+  const [executionKind, setExecutionKind] = useState<ExecutionKind>('prompt-session')
+  const [workflows, setWorkflows] = useState<WorkflowChoice[]>([])
+  const [workflowId, setWorkflowId] = useState('')
+  const [workflowTitle, setWorkflowTitle] = useState('')
+  const [workflowDescription, setWorkflowDescription] = useState('')
+  const [workflowStoryCode, setWorkflowStoryCode] = useState('')
   const [cwd, setCwd] = useState('')
   const [enabled, setEnabled] = useState(true)
   const [nextRun, setNextRun] = useState<string | null>(null)
@@ -254,11 +262,15 @@ export function SchedulerPanel({ onClose, t, sessions, workspaces }: SchedulerPa
     return () => { cancelled = true }
   }, [type, cron, runAt, everyMinutes])
 
+  const loadWorkflows = async (): Promise<void> => {
+    try { const result = await api.listWorkflows(); setWorkflows(result.workflows) }
+    catch (e) { setError(e instanceof Error ? e.message : String(e)) }
+  }
   const openNew = (): void => {
-    setEditId(null); setName(''); setType('cron'); setCron(''); setRunAt(''); setEveryMinutes(60); setCwd(''); setPrompt(''); setEnabled(true); setError(null); setNextRun(null); setCronChecked(false); setUpcoming([]); setView('form')
+    setEditId(null); setName(''); setType('cron'); setCron(''); setRunAt(''); setEveryMinutes(60); setCwd(''); setPrompt(''); setExecutionKind('prompt-session'); setWorkflowId(''); setWorkflowTitle(''); setWorkflowDescription(''); setWorkflowStoryCode(''); setEnabled(true); setError(null); setRunNotice(null); setNextRun(null); setCronChecked(false); setUpcoming([]); setView('form')
   }
   const openEdit = (task: TaskView): void => {
-    setEditId(task.id); setName(task.name); setType(task.type); setCron(task.cron); setRunAt(task.type === 'once' && task.runAt ? toLocalInput(task.runAt) : ''); setEveryMinutes(task.everyMinutes ?? 60); setCwd(task.cwd ?? ''); setPrompt(task.prompt); setEnabled(task.enabled); setError(null); setCronChecked(false); setUpcoming([]); setView('form')
+    setEditId(task.id); setName(task.name); setType(task.type); setCron(task.cron); setRunAt(task.type === 'once' && task.runAt ? toLocalInput(task.runAt) : ''); setEveryMinutes(task.everyMinutes ?? 60); setCwd(task.cwd ?? ''); setPrompt(task.prompt ?? ''); setExecutionKind(task.executionKind); setWorkflowId(task.workflowId ?? ''); setWorkflowTitle(task.workflowTitle ?? ''); setWorkflowDescription(task.workflowDescription ?? ''); setWorkflowStoryCode(task.workflowStoryCode ?? ''); if (task.executionKind === 'knj-workflow') void loadWorkflows(); setEnabled(task.enabled); setError(null); setRunNotice(null); setCronChecked(false); setUpcoming([]); setView('form')
   }
   const openHistory = async (task: TaskView): Promise<void> => {
     try {
@@ -288,7 +300,15 @@ export function SchedulerPanel({ onClose, t, sessions, workspaces }: SchedulerPa
   const save = async (): Promise<void> => {
     setBusy(true); setError(null)
     try {
-      const input: TaskInput = { name, type, prompt, enabled }
+      const input: TaskInput = { name, type, executionKind, enabled }
+      if (executionKind === 'knj-workflow') {
+        input.workflowId = workflowId
+        input.workflowTitle = workflowTitle
+        input.workflowDescription = workflowDescription
+        input.workflowStoryCode = workflowStoryCode
+      } else {
+        input.prompt = prompt
+      }
       if (type === 'cron') input.cron = cron
       else if (type === 'once') input.runAt = new Date(runAt).toISOString()
       else input.everyMinutes = everyMinutes
@@ -308,8 +328,25 @@ export function SchedulerPanel({ onClose, t, sessions, workspaces }: SchedulerPa
     catch (e) { setError(e instanceof Error ? e.message : String(e)) }
   }
   const run = async (task: TaskView): Promise<void> => {
-    try { await api.runTask(task.id); await reload() }
-    catch (e) { setError(e instanceof Error ? e.message : String(e)) }
+    if (runningTaskId !== null) return
+    setRunningTaskId(task.id)
+    setRunNotice(null)
+    setError(null)
+    try {
+      const response = await api.runTask(task.id)
+      if (response.result.status !== 'created') {
+        throw new Error(response.result.error ?? t('error.run'))
+      }
+      setRunNotice({
+        message: task.executionKind === 'knj-workflow' ? t('run.workflowStarted') : t('run.promptStarted'),
+        ...(response.result.workflowTaskId ? { workflowTaskId: response.result.workflowTaskId } : {}),
+      })
+      await reload()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setRunningTaskId(null)
+    }
   }
   const remove = async (task: TaskView): Promise<void> => {
     if (!window.confirm(t('btn.confirmDelete'))) return
@@ -319,6 +356,9 @@ export function SchedulerPanel({ onClose, t, sessions, workspaces }: SchedulerPa
 
   const cronOk = CRON_RE.test(cron.trim())
   const triggerValid = type === 'cron' ? cronOk : type === 'once' ? runAt !== '' : Number.isInteger(everyMinutes) && everyMinutes >= 1
+  const executionValid = executionKind === 'knj-workflow'
+    ? workflowId.trim() !== '' && workflowTitle.trim() !== '' && cwd.trim() !== ''
+    : prompt.trim() !== ''
 
   const checkCron = async (): Promise<void> => {
     setError(null)
@@ -354,6 +394,16 @@ export function SchedulerPanel({ onClose, t, sessions, workspaces }: SchedulerPa
         )}
         <div style={S.body} ref={bodyRef}>
           {error !== null && <div style={S.err}><IconCross size={15} />{error}</div>}
+          {runNotice !== null && (
+            <div style={{ ...S.err, background: 'color-mix(in srgb, var(--dsw-static-green-500) 12%, transparent)', borderColor: T.success, color: T.success }}>
+              <IconCheck size={15} />{runNotice.message}
+              {runNotice.workflowTaskId !== undefined && (
+                <button type="button" style={{ ...S.btn, height: 28, padding: '0 10px', fontSize: 12, marginLeft: 'auto' }} onClick={() => window.dispatchEvent(new CustomEvent('dsh-knj-workflow:open-task', { detail: { taskId: runNotice.workflowTaskId } }))}>
+                  {t('history.openWorkflowTask')}
+                </button>
+              )}
+            </div>
+          )}
 
           {view === 'list' && (
             <div>
@@ -381,11 +431,11 @@ export function SchedulerPanel({ onClose, t, sessions, workspaces }: SchedulerPa
                       <span style={S.metaItem}>{t('col.next')}：{task.enabled && task.nextRun !== null ? formatTime(task.nextRun) : t('next.unknown')}</span>
                       {task.cwd !== undefined && task.cwd !== '' && <span style={S.metaItem}>{t('form.cwd')}：{task.cwd}</span>}
                     </div>
-                    <div style={S.prompt} title={task.prompt}>{task.prompt}</div>
+                    <div style={S.prompt} title={task.executionKind === 'knj-workflow' ? task.workflowTitle : task.prompt}>{task.executionKind === 'knj-workflow' ? `${task.workflowTitle} · ${task.workflowId}` : task.prompt}</div>
                     <div style={S.actions}>
                       <button style={S.btn} onClick={() => openEdit(task)}><IconEdit size={14} />{t('btn.edit')}</button>
                       <button style={S.btn} onClick={() => void toggle(task)}>{task.enabled ? t('status.disabled') : t('status.enabled')}</button>
-                      <button style={S.btn} onClick={() => void run(task)}><IconPlay size={13} />{t('btn.run')}</button>
+                      <button style={{ ...S.btn, ...(runningTaskId === task.id ? { opacity: 0.65, cursor: 'wait' } : {}) }} onClick={() => void run(task)} disabled={runningTaskId !== null}><IconPlay size={13} />{runningTaskId === task.id ? t('run.pending') : t('btn.run')}</button>
                       <button style={S.btn} onClick={() => void openHistory(task)}><IconHistory size={14} />{t('btn.history')}</button>
                       <span style={S.spacer} />
                       <button style={S.iconBtn} title={t('btn.delete')} onClick={() => void remove(task)}><IconTrash size={15} /></button>
@@ -436,6 +486,13 @@ export function SchedulerPanel({ onClose, t, sessions, workspaces }: SchedulerPa
                 <input style={S.input} value={name} onChange={(e) => setName(e.target.value)} placeholder={t('form.name')} />
               </div>
               <div style={S.field}>
+                <label style={S.label}>{t('form.executionKind')}</label>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <button style={{ ...S.seg, ...(executionKind === 'prompt-session' ? S.segOn : {}) }} onClick={() => setExecutionKind('prompt-session')}>{t('form.promptSession')}</button>
+                  <button style={{ ...S.seg, ...(executionKind === 'knj-workflow' ? S.segOn : {}) }} onClick={() => { setExecutionKind('knj-workflow'); void loadWorkflows() }}>{t('form.workflow')}</button>
+                </div>
+              </div>
+              <div style={S.field}>
                 <label style={S.label}>{t('form.cwd')}</label>
                 <select style={{ ...S.input, height: 38 }} value={cwd} onChange={(e) => setCwd(e.target.value)}>
                   <option value="">{t('form.cwdDefault')}</option>
@@ -475,10 +532,34 @@ export function SchedulerPanel({ onClose, t, sessions, workspaces }: SchedulerPa
                   <input type="number" min={1} style={S.input} value={everyMinutes} onChange={(e) => setEveryMinutes(Number(e.target.value) || 1)} />
                 </div>
               )}
-              <div style={S.field}>
-                <label style={S.label}>{t('form.prompt')} *</label>
-                <textarea style={{ ...S.input, minHeight: 96, resize: 'vertical', lineHeight: 1.5 }} value={prompt} onChange={(e) => setPrompt(e.target.value)} placeholder={t('form.promptPlaceholder')} />
-              </div>
+              {executionKind === 'knj-workflow' ? (
+                <>
+                  <div style={S.field}>
+                    <label style={S.label}>{t('form.workflowSelect')} *</label>
+                    <select style={{ ...S.input, height: 38 }} value={workflowId} onChange={(e) => setWorkflowId(e.target.value)}>
+                      <option value="">{t('form.workflowSelect')}</option>
+                      {workflows.map((workflow) => <option key={workflow.id} value={workflow.id}>{workflow.name}</option>)}
+                    </select>
+                  </div>
+                  <div style={S.field}>
+                    <label style={S.label}>{t('form.workflowTitle')} *</label>
+                    <input style={S.input} value={workflowTitle} onChange={(e) => setWorkflowTitle(e.target.value)} />
+                  </div>
+                  <div style={S.field}>
+                    <label style={S.label}>{t('form.workflowDescription')}</label>
+                    <textarea style={{ ...S.input, minHeight: 72, resize: 'vertical' }} value={workflowDescription} onChange={(e) => setWorkflowDescription(e.target.value)} />
+                  </div>
+                  <div style={S.field}>
+                    <label style={S.label}>{t('form.workflowStoryCode')}</label>
+                    <input style={S.input} value={workflowStoryCode} onChange={(e) => setWorkflowStoryCode(e.target.value)} placeholder={t('form.workflowStoryCodePlaceholder')} />
+                  </div>
+                </>
+              ) : (
+                <div style={S.field}>
+                  <label style={S.label}>{t('form.prompt')} *</label>
+                  <textarea style={{ ...S.input, minHeight: 96, resize: 'vertical', lineHeight: 1.5 }} value={prompt} onChange={(e) => setPrompt(e.target.value)} placeholder={t('form.promptPlaceholder')} />
+                </div>
+              )}
               <div style={S.field}>
                 <div style={S.nextRun}>
                   <IconClock size={13} />
@@ -491,7 +572,7 @@ export function SchedulerPanel({ onClose, t, sessions, workspaces }: SchedulerPa
               </div>
               <div style={S.foot}>
                 <button style={S.btn} onClick={() => setView('list')} disabled={busy}>{t('btn.cancel')}</button>
-                <button style={S.btnPrimary} onClick={() => void save()} disabled={busy || name.trim() === '' || prompt.trim() === '' || !triggerValid}>
+                <button style={S.btnPrimary} onClick={() => void save()} disabled={busy || name.trim() === '' || !executionValid || !triggerValid}>
                   {t('btn.save')}
                 </button>
               </div>
@@ -572,6 +653,15 @@ function HistoryRow({ entry, name, t, onOpenSession }: { entry: HistoryEntry; na
       <span style={{ ...S.sub, minWidth: 140 }}>{formatTime(entry.at)}</span>
       <span style={{ flex: 1, fontSize: 13 }}>{statusText}</span>
       <span style={{ ...S.sub, fontSize: 12, flexShrink: 0 }}>{entry.ms !== undefined ? `${entry.ms}ms` : '—'}</span>
+      {!running && entry.workflowTaskId !== undefined && (
+        <button
+          type="button"
+          style={{ ...S.btn, height: 28, padding: '0 10px', fontSize: 12, flexShrink: 0, whiteSpace: 'nowrap' }}
+          onClick={() => window.dispatchEvent(new CustomEvent('dsh-knj-workflow:open-task', { detail: { taskId: entry.workflowTaskId } }))}
+        >
+          {t('history.openWorkflowTask')}
+        </button>
+      )}
       {!running && entry.sessionId !== undefined && onOpenSession !== undefined && (
         <button
           type="button"

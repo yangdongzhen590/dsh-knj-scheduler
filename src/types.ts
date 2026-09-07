@@ -8,6 +8,7 @@
 import { Cron } from 'croner'
 
 export type TaskType = 'cron' | 'once' | 'interval'
+export type ExecutionKind = 'prompt-session' | 'knj-workflow'
 
 export interface TaskDef {
   /** Stable unique id (uuid). */
@@ -24,10 +25,18 @@ export interface TaskDef {
   runAt?: string
   /** Repeat interval in minutes (interval type). */
   everyMinutes?: number
-  /** Working directory for the session this task creates (absolute path of a workspace; omitted = host process cwd). */
+  /** Working directory for the execution (required for workflow tasks). */
   cwd?: string
+  /** Execution behavior, independent of the trigger. Missing persisted values mean prompt-session. */
+  executionKind: ExecutionKind
   /** The prompt injected as the first message of a newly created session. */
-  prompt: string
+  prompt?: string
+  /** Selected KNJ workflow and the development-task title/description. */
+  workflowId?: string
+  workflowTitle?: string
+  workflowDescription?: string
+  /** Optional user-story code forwarded to the workflow task as storyCode. */
+  workflowStoryCode?: string
   createdAt: string
   updatedAt: string
 }
@@ -39,23 +48,41 @@ export interface TaskInput {
   runAt?: string
   everyMinutes?: number
   cwd?: string
-  prompt: string
+  executionKind?: ExecutionKind
+  prompt?: string
+  workflowId?: string
+  workflowTitle?: string
+  workflowDescription?: string
+  /** Optional user-story code forwarded to the workflow task as storyCode. */
+  workflowStoryCode?: string
   enabled?: boolean
 }
 
 /** Validation result: pass, or a stable machine-readable error code. */
 export type ValidateResult =
   | { ok: true }
-  | { ok: false; code: 'name_required' | 'prompt_required' | 'invalid_cron' | 'invalid_run_at' | 'invalid_interval'; message: string }
+  | { ok: false; code: 'name_required' | 'prompt_required' | 'workflow_id_required' | 'workflow_title_required' | 'cwd_required' | 'invalid_cron' | 'invalid_run_at' | 'invalid_interval'; message: string }
 
 /** Loose structural validation for fields that do not need cron parsing. */
+export function effectiveExecutionKind(input: Pick<TaskInput, 'executionKind'>): ExecutionKind {
+  return input.executionKind === 'knj-workflow' ? 'knj-workflow' : 'prompt-session'
+}
+
 export function validateTaskInput(input: TaskInput): ValidateResult {
   const name = typeof input.name === 'string' ? input.name.trim() : ''
-  const prompt = typeof input.prompt === 'string' ? input.prompt.trim() : ''
   if (name === '') {
     return { ok: false, code: 'name_required', message: '任务名称不能为空 / task name is required' }
   }
-  if (prompt === '') {
+  if (input.executionKind !== undefined && input.executionKind !== 'prompt-session' && input.executionKind !== 'knj-workflow') {
+    return { ok: false, code: 'workflow_id_required', message: '执行类型无效 / execution kind is invalid' }
+  }
+  if (effectiveExecutionKind(input) === 'knj-workflow') {
+    if (typeof input.workflowId !== 'string' || input.workflowId.trim() === '') return { ok: false, code: 'workflow_id_required', message: '请选择工作流 / workflow is required' }
+    if (typeof input.workflowTitle !== 'string' || input.workflowTitle.trim() === '') return { ok: false, code: 'workflow_title_required', message: '流程任务标题不能为空 / workflow task title is required' }
+    if (typeof input.cwd !== 'string' || input.cwd.trim() === '') return { ok: false, code: 'cwd_required', message: '流程任务必须选择工作目录 / workflow task cwd is required' }
+    return { ok: true }
+  }
+  if (typeof input.prompt !== 'string' || input.prompt.trim() === '') {
     return { ok: false, code: 'prompt_required', message: '提示词不能为空 / prompt is required' }
   }
   return { ok: true }

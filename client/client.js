@@ -50,6 +50,18 @@ window.__ModuleLoader__.load({
 			"form.cwdDefault": "默认（当前工作区）",
 			"form.cwdHint": "执行时创建的会话将落在该工作区，之后可从执行列表直接打开",
 			"form.prompt": "提示词（到点作为首条消息带入新建的 DSH 会话）",
+			"form.executionKind": "执行类型",
+			"form.promptSession": "提示词会话",
+			"form.workflow": "KNJ 工作流",
+			"form.workflowSelect": "选择工作流",
+			"form.workflowTitle": "流程任务标题",
+			"form.workflowDescription": "流程任务描述（可选）",
+			"form.workflowStoryCode": "用户故事编码（可选）",
+			"form.workflowStoryCodePlaceholder": "如 US-123（可留空）",
+			"run.pending": "正在启动任务…",
+			"run.promptStarted": "已创建提示词会话。",
+			"run.workflowStarted": "已启动流程任务；详细状态请在流程运行中查看。",
+			"history.openWorkflowTask": "查看流程任务",
 			"form.enabled": "启用任务",
 			"form.nextRun": "下次执行",
 			"btn.validate": "校验",
@@ -122,6 +134,18 @@ window.__ModuleLoader__.load({
 			"form.cwdDefault": "Default (current workspace)",
 			"form.cwdHint": "Executions create sessions in this workspace, so they stay openable from the executions list",
 			"form.prompt": "Prompt (injected as the first message of a new session)",
+			"form.executionKind": "Execution type",
+			"form.promptSession": "Prompt session",
+			"form.workflow": "KNJ workflow",
+			"form.workflowSelect": "Select workflow",
+			"form.workflowTitle": "Workflow task title",
+			"form.workflowDescription": "Workflow task description (optional)",
+			"form.workflowStoryCode": "User story code (optional)",
+			"form.workflowStoryCodePlaceholder": "e.g. US-123 (optional)",
+			"run.pending": "Starting task…",
+			"run.promptStarted": "Prompt session created.",
+			"run.workflowStarted": "Workflow task started; view detailed status in workflow runs.",
+			"history.openWorkflowTask": "Open workflow task",
 			"form.enabled": "Enable task",
 			"form.nextRun": "Next run",
 			"btn.validate": "Validate",
@@ -168,6 +192,9 @@ window.__ModuleLoader__.load({
 		}
 		function listTasks() {
 			return api("/dsh-scheduler/tasks");
+		}
+		function listWorkflows() {
+			return api("/dsh-scheduler/workflows");
 		}
 		function createTask(input) {
 			return api("/dsh-scheduler/tasks", {
@@ -690,6 +717,8 @@ window.__ModuleLoader__.load({
 			const [history, setHistory] = (0, react.useState)([]);
 			const [error, setError] = (0, react.useState)(null);
 			const [busy, setBusy] = (0, react.useState)(false);
+			const [runningTaskId, setRunningTaskId] = (0, react.useState)(null);
+			const [runNotice, setRunNotice] = (0, react.useState)(null);
 			const [editId, setEditId] = (0, react.useState)(null);
 			const [name, setName] = (0, react.useState)("");
 			const [type, setType] = (0, react.useState)("cron");
@@ -697,6 +726,12 @@ window.__ModuleLoader__.load({
 			const [runAt, setRunAt] = (0, react.useState)("");
 			const [everyMinutes, setEveryMinutes] = (0, react.useState)(60);
 			const [prompt, setPrompt] = (0, react.useState)("");
+			const [executionKind, setExecutionKind] = (0, react.useState)("prompt-session");
+			const [workflows, setWorkflows] = (0, react.useState)([]);
+			const [workflowId, setWorkflowId] = (0, react.useState)("");
+			const [workflowTitle, setWorkflowTitle] = (0, react.useState)("");
+			const [workflowDescription, setWorkflowDescription] = (0, react.useState)("");
+			const [workflowStoryCode, setWorkflowStoryCode] = (0, react.useState)("");
 			const [cwd, setCwd] = (0, react.useState)("");
 			const [enabled, setEnabled] = (0, react.useState)(true);
 			const [nextRun, setNextRun] = (0, react.useState)(null);
@@ -798,6 +833,14 @@ window.__ModuleLoader__.load({
 				runAt,
 				everyMinutes
 			]);
+			const loadWorkflows = async () => {
+				try {
+					const result = await listWorkflows();
+					setWorkflows(result.workflows);
+				} catch (e) {
+					setError(e instanceof Error ? e.message : String(e));
+				}
+			};
 			const openNew = () => {
 				setEditId(null);
 				setName("");
@@ -807,8 +850,14 @@ window.__ModuleLoader__.load({
 				setEveryMinutes(60);
 				setCwd("");
 				setPrompt("");
+				setExecutionKind("prompt-session");
+				setWorkflowId("");
+				setWorkflowTitle("");
+				setWorkflowDescription("");
+				setWorkflowStoryCode("");
 				setEnabled(true);
 				setError(null);
+				setRunNotice(null);
 				setNextRun(null);
 				setCronChecked(false);
 				setUpcoming([]);
@@ -822,9 +871,16 @@ window.__ModuleLoader__.load({
 				setRunAt(task.type === "once" && task.runAt ? toLocalInput(task.runAt) : "");
 				setEveryMinutes(task.everyMinutes ?? 60);
 				setCwd(task.cwd ?? "");
-				setPrompt(task.prompt);
+				setPrompt(task.prompt ?? "");
+				setExecutionKind(task.executionKind);
+				setWorkflowId(task.workflowId ?? "");
+				setWorkflowTitle(task.workflowTitle ?? "");
+				setWorkflowDescription(task.workflowDescription ?? "");
+				setWorkflowStoryCode(task.workflowStoryCode ?? "");
+				if (task.executionKind === "knj-workflow") loadWorkflows();
 				setEnabled(task.enabled);
 				setError(null);
+				setRunNotice(null);
 				setCronChecked(false);
 				setUpcoming([]);
 				setView("form");
@@ -861,9 +917,15 @@ window.__ModuleLoader__.load({
 					const input = {
 						name,
 						type,
-						prompt,
+						executionKind,
 						enabled
 					};
+					if (executionKind === "knj-workflow") {
+						input.workflowId = workflowId;
+						input.workflowTitle = workflowTitle;
+						input.workflowDescription = workflowDescription;
+						input.workflowStoryCode = workflowStoryCode;
+					} else input.prompt = prompt;
 					if (type === "cron") input.cron = cron;
 					else if (type === "once") input.runAt = new Date(runAt).toISOString();
 					else input.everyMinutes = everyMinutes;
@@ -887,11 +949,22 @@ window.__ModuleLoader__.load({
 				}
 			};
 			const run = async (task) => {
+				if (runningTaskId !== null) return;
+				setRunningTaskId(task.id);
+				setRunNotice(null);
+				setError(null);
 				try {
-					await runTask(task.id);
+					const response = await runTask(task.id);
+					if (response.result.status !== "created") throw new Error(response.result.error ?? t("error.run"));
+					setRunNotice({
+						message: task.executionKind === "knj-workflow" ? t("run.workflowStarted") : t("run.promptStarted"),
+						...response.result.workflowTaskId ? { workflowTaskId: response.result.workflowTaskId } : {}
+					});
 					await reload();
 				} catch (e) {
 					setError(e instanceof Error ? e.message : String(e));
+				} finally {
+					setRunningTaskId(null);
 				}
 			};
 			const remove = async (task) => {
@@ -905,6 +978,7 @@ window.__ModuleLoader__.load({
 			};
 			const cronOk = CRON_RE.test(cron.trim());
 			const triggerValid = type === "cron" ? cronOk : type === "once" ? runAt !== "" : Number.isInteger(everyMinutes) && everyMinutes >= 1;
+			const executionValid = executionKind === "knj-workflow" ? workflowId.trim() !== "" && workflowTitle.trim() !== "" && cwd.trim() !== "" : prompt.trim() !== "";
 			const checkCron = async () => {
 				setError(null);
 				setCronChecked(true);
@@ -982,6 +1056,30 @@ window.__ModuleLoader__.load({
 									style: S.err,
 									children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)(IconCross, { size: 15 }), error]
 								}),
+								runNotice !== null && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+									style: {
+										...S.err,
+										background: "color-mix(in srgb, var(--dsw-static-green-500) 12%, transparent)",
+										borderColor: T.success,
+										color: T.success
+									},
+									children: [
+										/* @__PURE__ */ (0, react_jsx_runtime.jsx)(IconCheck, { size: 15 }),
+										runNotice.message,
+										runNotice.workflowTaskId !== void 0 && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+											type: "button",
+											style: {
+												...S.btn,
+												height: 28,
+												padding: "0 10px",
+												fontSize: 12,
+												marginLeft: "auto"
+											},
+											onClick: () => window.dispatchEvent(new CustomEvent("dsh-knj-workflow:open-task", { detail: { taskId: runNotice.workflowTaskId } })),
+											children: t("history.openWorkflowTask")
+										})
+									]
+								}),
 								view === "list" && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", { children: [/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
 									style: S.toolbar,
 									children: [/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("button", {
@@ -1043,8 +1141,8 @@ window.__ModuleLoader__.load({
 										}),
 										/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
 											style: S.prompt,
-											title: task.prompt,
-											children: task.prompt
+											title: task.executionKind === "knj-workflow" ? task.workflowTitle : task.prompt,
+											children: task.executionKind === "knj-workflow" ? `${task.workflowTitle} · ${task.workflowId}` : task.prompt
 										}),
 										/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
 											style: S.actions,
@@ -1060,9 +1158,16 @@ window.__ModuleLoader__.load({
 													children: task.enabled ? t("status.disabled") : t("status.enabled")
 												}),
 												/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("button", {
-													style: S.btn,
+													style: {
+														...S.btn,
+														...runningTaskId === task.id ? {
+															opacity: .65,
+															cursor: "wait"
+														} : {}
+													},
 													onClick: () => void run(task),
-													children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)(IconPlay, { size: 13 }), t("btn.run")]
+													disabled: runningTaskId !== null,
+													children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)(IconPlay, { size: 13 }), runningTaskId === task.id ? t("run.pending") : t("btn.run")]
 												}),
 												/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("button", {
 													style: S.btn,
@@ -1139,6 +1244,36 @@ window.__ModuleLoader__.load({
 												value: name,
 												onChange: (e) => setName(e.target.value),
 												placeholder: t("form.name")
+											})]
+										}),
+										/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+											style: S.field,
+											children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("label", {
+												style: S.label,
+												children: t("form.executionKind")
+											}), /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+												style: {
+													display: "flex",
+													gap: 8
+												},
+												children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+													style: {
+														...S.seg,
+														...executionKind === "prompt-session" ? S.segOn : {}
+													},
+													onClick: () => setExecutionKind("prompt-session"),
+													children: t("form.promptSession")
+												}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+													style: {
+														...S.seg,
+														...executionKind === "knj-workflow" ? S.segOn : {}
+													},
+													onClick: () => {
+														setExecutionKind("knj-workflow");
+														loadWorkflows();
+													},
+													children: t("form.workflow")
+												})]
 											})]
 										}),
 										/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
@@ -1259,7 +1394,67 @@ window.__ModuleLoader__.load({
 												onChange: (e) => setEveryMinutes(Number(e.target.value) || 1)
 											})]
 										}),
-										/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+										executionKind === "knj-workflow" ? /* @__PURE__ */ (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [
+											/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+												style: S.field,
+												children: [/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("label", {
+													style: S.label,
+													children: [t("form.workflowSelect"), " *"]
+												}), /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("select", {
+													style: {
+														...S.input,
+														height: 38
+													},
+													value: workflowId,
+													onChange: (e) => setWorkflowId(e.target.value),
+													children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("option", {
+														value: "",
+														children: t("form.workflowSelect")
+													}), workflows.map((workflow) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)("option", {
+														value: workflow.id,
+														children: workflow.name
+													}, workflow.id))]
+												})]
+											}),
+											/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+												style: S.field,
+												children: [/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("label", {
+													style: S.label,
+													children: [t("form.workflowTitle"), " *"]
+												}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("input", {
+													style: S.input,
+													value: workflowTitle,
+													onChange: (e) => setWorkflowTitle(e.target.value)
+												})]
+											}),
+											/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+												style: S.field,
+												children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("label", {
+													style: S.label,
+													children: t("form.workflowDescription")
+												}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("textarea", {
+													style: {
+														...S.input,
+														minHeight: 72,
+														resize: "vertical"
+													},
+													value: workflowDescription,
+													onChange: (e) => setWorkflowDescription(e.target.value)
+												})]
+											}),
+											/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+												style: S.field,
+												children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("label", {
+													style: S.label,
+													children: t("form.workflowStoryCode")
+												}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("input", {
+													style: S.input,
+													value: workflowStoryCode,
+													onChange: (e) => setWorkflowStoryCode(e.target.value),
+													placeholder: t("form.workflowStoryCodePlaceholder")
+												})]
+											})
+										] }) : /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
 											style: S.field,
 											children: [/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("label", {
 												style: S.label,
@@ -1316,7 +1511,7 @@ window.__ModuleLoader__.load({
 											}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
 												style: S.btnPrimary,
 												onClick: () => void save(),
-												disabled: busy || name.trim() === "" || prompt.trim() === "" || !triggerValid,
+												disabled: busy || name.trim() === "" || !executionValid || !triggerValid,
 												children: t("btn.save")
 											})]
 										})
@@ -1441,6 +1636,19 @@ window.__ModuleLoader__.load({
 							flexShrink: 0
 						},
 						children: entry.ms !== void 0 ? `${entry.ms}ms` : "—"
+					}),
+					!running && entry.workflowTaskId !== void 0 && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+						type: "button",
+						style: {
+							...S.btn,
+							height: 28,
+							padding: "0 10px",
+							fontSize: 12,
+							flexShrink: 0,
+							whiteSpace: "nowrap"
+						},
+						onClick: () => window.dispatchEvent(new CustomEvent("dsh-knj-workflow:open-task", { detail: { taskId: entry.workflowTaskId } })),
+						children: t("history.openWorkflowTask")
 					}),
 					!running && entry.sessionId !== void 0 && onOpenSession !== void 0 && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
 						type: "button",

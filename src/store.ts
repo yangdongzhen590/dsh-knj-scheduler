@@ -5,7 +5,7 @@
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import type { TaskDef, TaskInput } from './types.ts'
-import { validateTask, effectiveType } from './types.ts'
+import { validateTask, effectiveExecutionKind, effectiveType } from './types.ts'
 
 const TASKS_FILE = 'tasks.json'
 const HISTORY_FILE = 'history.jsonl'
@@ -19,6 +19,7 @@ export interface HistoryEntry {
   at: string
   status: HistoryStatus
   sessionId?: string
+  workflowTaskId?: string
   ms?: number
   error?: string
 }
@@ -55,7 +56,11 @@ export class TaskStore {
       }
       const parsed = JSON.parse(readFileSync(this.tasksFile(), 'utf8')) as Partial<StoreFile>
       const raw = Array.isArray(parsed.tasks) ? parsed.tasks : []
-      this.tasks = raw.filter((t): t is TaskDef => isTaskDef(t)).map((t) => ({ ...t, type: t.type === 'once' || t.type === 'interval' ? t.type : 'cron' }))
+      this.tasks = raw.filter((t): t is TaskDef => isTaskDef(t)).map((t) => ({
+        ...t,
+        type: t.type === 'once' || t.type === 'interval' ? t.type : 'cron',
+        executionKind: t.executionKind === 'knj-workflow' ? 'knj-workflow' : 'prompt-session',
+      }))
     } catch (error) {
       // A corrupt file must never take the plugin down; keep the previous state.
       console.error('[dsh-scheduler] tasks.json 读取失败（保留内存状态）:', error)
@@ -76,6 +81,7 @@ export class TaskStore {
     const result = validateTask(input)
     if (!result.ok) return null
     const type = effectiveType(input)
+    const executionKind = effectiveExecutionKind(input)
     const task: TaskDef = {
       id: randomId(),
       name: input.name.trim(),
@@ -85,7 +91,13 @@ export class TaskStore {
       ...(type === 'once' ? { runAt: new Date(input.runAt as string).toISOString() } : {}),
       ...(type === 'interval' ? { everyMinutes: Number(input.everyMinutes) } : {}),
       ...(typeof input.cwd === 'string' && input.cwd.trim() !== '' ? { cwd: input.cwd.trim() } : {}),
-      prompt: input.prompt.trim(),
+      executionKind,
+      ...(executionKind === 'prompt-session' ? { prompt: input.prompt!.trim() } : {
+        workflowId: input.workflowId!.trim(),
+        workflowTitle: input.workflowTitle!.trim(),
+        ...(typeof input.workflowDescription === 'string' && input.workflowDescription.trim() !== '' ? { workflowDescription: input.workflowDescription.trim() } : {}),
+        ...(typeof input.workflowStoryCode === 'string' && input.workflowStoryCode.trim() !== '' ? { workflowStoryCode: input.workflowStoryCode.trim() } : {}),
+      }),
       createdAt: now,
       updatedAt: now,
     }
@@ -107,7 +119,20 @@ export class TaskStore {
     task.runAt = type === 'once' ? new Date(input.runAt as string).toISOString() : undefined
     task.everyMinutes = type === 'interval' ? Number(input.everyMinutes) : undefined
     task.cwd = typeof input.cwd === 'string' && input.cwd.trim() !== '' ? input.cwd.trim() : undefined
-    task.prompt = input.prompt.trim()
+    task.executionKind = effectiveExecutionKind(input)
+    if (task.executionKind === 'prompt-session') {
+      task.prompt = input.prompt!.trim()
+      task.workflowId = undefined
+      task.workflowTitle = undefined
+      task.workflowDescription = undefined
+      task.workflowStoryCode = undefined
+    } else {
+      task.prompt = undefined
+      task.workflowId = input.workflowId!.trim()
+      task.workflowTitle = input.workflowTitle!.trim()
+      task.workflowDescription = typeof input.workflowDescription === 'string' && input.workflowDescription.trim() !== '' ? input.workflowDescription.trim() : undefined
+      task.workflowStoryCode = typeof input.workflowStoryCode === 'string' && input.workflowStoryCode.trim() !== '' ? input.workflowStoryCode.trim() : undefined
+    }
     if (typeof input.enabled === 'boolean') task.enabled = input.enabled
     task.updatedAt = new Date().toISOString()
     this.persist()
@@ -244,7 +269,9 @@ function isTaskDef(value: unknown): value is TaskDef {
     typeof t.id === 'string' &&
     typeof t.name === 'string' &&
     typeof t.cron === 'string' &&
-    typeof t.prompt === 'string' &&
+    (t.executionKind === 'knj-workflow'
+      ? typeof t.workflowId === 'string' && typeof t.workflowTitle === 'string'
+      : typeof t.prompt === 'string') &&
     typeof t.enabled === 'boolean' &&
     typeof t.createdAt === 'string' &&
     typeof t.updatedAt === 'string'

@@ -7,6 +7,7 @@ export interface HistoryEntry {
     at: string;
     status: HistoryStatus;
     sessionId?: string;
+    workflowTaskId?: string;
     ms?: number;
     error?: string;
 }

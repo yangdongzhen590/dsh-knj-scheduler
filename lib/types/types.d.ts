@@ -1,4 +1,5 @@
 export type TaskType = 'cron' | 'once' | 'interval';
+export type ExecutionKind = 'prompt-session' | 'knj-workflow';
 export interface TaskDef {
     /** Stable unique id (uuid). */
     id: string;
@@ -14,10 +15,18 @@ export interface TaskDef {
     runAt?: string;
     /** Repeat interval in minutes (interval type). */
     everyMinutes?: number;
-    /** Working directory for the session this task creates (absolute path of a workspace; omitted = host process cwd). */
+    /** Working directory for the execution (required for workflow tasks). */
     cwd?: string;
+    /** Execution behavior, independent of the trigger. Missing persisted values mean prompt-session. */
+    executionKind: ExecutionKind;
     /** The prompt injected as the first message of a newly created session. */
-    prompt: string;
+    prompt?: string;
+    /** Selected KNJ workflow and the development-task title/description. */
+    workflowId?: string;
+    workflowTitle?: string;
+    workflowDescription?: string;
+    /** Optional user-story code forwarded to the workflow task as storyCode. */
+    workflowStoryCode?: string;
     createdAt: string;
     updatedAt: string;
 }
@@ -28,7 +37,13 @@ export interface TaskInput {
     runAt?: string;
     everyMinutes?: number;
     cwd?: string;
-    prompt: string;
+    executionKind?: ExecutionKind;
+    prompt?: string;
+    workflowId?: string;
+    workflowTitle?: string;
+    workflowDescription?: string;
+    /** Optional user-story code forwarded to the workflow task as storyCode. */
+    workflowStoryCode?: string;
     enabled?: boolean;
 }
 /** Validation result: pass, or a stable machine-readable error code. */
@@ -36,10 +51,11 @@ export type ValidateResult = {
     ok: true;
 } | {
     ok: false;
-    code: 'name_required' | 'prompt_required' | 'invalid_cron' | 'invalid_run_at' | 'invalid_interval';
+    code: 'name_required' | 'prompt_required' | 'workflow_id_required' | 'workflow_title_required' | 'cwd_required' | 'invalid_cron' | 'invalid_run_at' | 'invalid_interval';
     message: string;
 };
 /** Loose structural validation for fields that do not need cron parsing. */
+export declare function effectiveExecutionKind(input: Pick<TaskInput, 'executionKind'>): ExecutionKind;
 export declare function validateTaskInput(input: TaskInput): ValidateResult;
 /** Parse a cron expression, returning an error message when invalid. */
 export declare function describeCronError(cron: string): string | null;

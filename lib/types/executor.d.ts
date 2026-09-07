@@ -4,6 +4,7 @@ import type { TaskDef } from './types.ts';
 export interface ExecuteResult {
     status: 'created' | 'failed';
     sessionId?: string;
+    workflowTaskId?: string;
     ms: number;
     error?: string;
 }

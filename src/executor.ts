@@ -14,8 +14,13 @@ import type { TaskDef } from './types.ts'
 export interface ExecuteResult {
   status: 'created' | 'failed'
   sessionId?: string
+  workflowTaskId?: string
   ms: number
   error?: string
+}
+
+interface KnjWorkflowSchedulerService {
+  createAndStartScheduledTask(input: { workflowId: string; title: string; description?: string; storyCode?: string; cwd: string }): Promise<{ taskId: string; parentSessionId?: string; runId: string }>
 }
 
 /** The default model selection the deployment provides for model-less agents. */
@@ -34,6 +39,20 @@ export async function executeTask(ctx: Context, task: TaskDef): Promise<ExecuteR
   const started = Date.now()
   let agents: AgentsServiceLike | undefined
   try {
+    if (task.executionKind === 'knj-workflow') {
+      const workflow = ctx.get('knjWorkflowScheduler') as KnjWorkflowSchedulerService | undefined
+      if (workflow === undefined || typeof workflow.createAndStartScheduledTask !== 'function') {
+        return { status: 'failed', ms: Date.now() - started, error: 'dsh-knj-workflow scheduler service is unavailable' }
+      }
+      const launch = await workflow.createAndStartScheduledTask({
+        workflowId: task.workflowId!,
+        title: task.workflowTitle!,
+        ...(task.workflowDescription ? { description: task.workflowDescription } : {}),
+        storyCode: task.workflowStoryCode,
+        cwd: task.cwd!,
+      })
+      return { status: 'created', workflowTaskId: launch.taskId, ms: Date.now() - started }
+    }
     agents = ctx.get('agents') as AgentsServiceLike | undefined
     if (agents === undefined || typeof agents.create !== 'function') {
       return {
@@ -63,7 +82,7 @@ export async function executeTask(ctx: Context, task: TaskDef): Promise<ExecuteR
     })
     const message = createMessage({
       role: 'user',
-      content: [{ type: 'text', text: task.prompt }],
+      content: [{ type: 'text', text: task.prompt! }],
       source: { kind: 'plugin', plugin: 'dsh-scheduler' },
     })
     agent.followup(message)
