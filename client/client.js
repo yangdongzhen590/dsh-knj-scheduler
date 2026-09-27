@@ -54,10 +54,24 @@ window.__ModuleLoader__.load({
 			"form.promptSession": "提示词会话",
 			"form.workflow": "KNJ 工作流",
 			"form.workflowSelect": "选择工作流",
-			"form.workflowTitle": "流程任务标题",
+			"form.workflowTitle": "流程任务标题（可留空）",
+			"form.workflowTitlePlaceholder": "留空则按描述自动生成标题",
 			"form.workflowDescription": "流程任务描述（可选）",
 			"form.workflowStoryCode": "用户故事编码（可选）",
 			"form.workflowStoryCodePlaceholder": "如 US-123（可留空）",
+			"form.workflowPathInputs": "文件入参（按路径引用）",
+			"form.workflowPathInputsHint": "路径在每次触发时读取（不做快照）；相对路径按任务工作目录解析，文件不存在会导致本次启动失败。需要节点自己解析文档。",
+			"form.workflowPathRequiredPlaceholder": "必填：请填写文件路径，如 docs/today.md",
+			"form.workflowPathPlaceholder": "可留空，如 docs/today.md",
+			"form.workflowAttachments": "附件（不需要声明）",
+			"form.workflowAttachmentsHint": "上传的文件存在调度器自己的目录里，每次触发都用这份快照；节点用 ${inputs.附件} 拿到换行拼接的绝对路径清单并自行解析文档。与上面的「按路径引用」的区别：附件是快照，路径是每次触发读当时的文件。",
+			"form.workflowAttachmentsPick": "选择文件（可多选）",
+			"form.workflowAttachmentsUploading": "上传中…",
+			"form.workflowAttachmentsNone": "未选择文件",
+			"form.workflowAttachmentsCount": "已选 {n} 个",
+			"form.workflowAttachmentsFailed": "附件上传失败：",
+			"btn.remove": "移除",
+			"form.workflowNoFileInputs": "该工作流未声明「文件」类型入参，因此没有路径字段。要把本地文件交给流程，直接用上面的「附件」（不需要任何声明）；需要按路径引用（文件由别的流程产出、每次读最新）时再声明：打开「流程设计」→ 该工作流 → 顶部「输入参数」→ 添加一个类型为「文件」的参数并保存。",
 			"run.pending": "正在启动任务…",
 			"run.promptStarted": "已创建提示词会话。",
 			"run.workflowStarted": "已启动流程任务；详细状态请在流程运行中查看。",
@@ -138,10 +152,24 @@ window.__ModuleLoader__.load({
 			"form.promptSession": "Prompt session",
 			"form.workflow": "KNJ workflow",
 			"form.workflowSelect": "Select workflow",
-			"form.workflowTitle": "Workflow task title",
+			"form.workflowTitle": "Workflow task title (optional)",
+			"form.workflowTitlePlaceholder": "Leave blank to derive the title from the description",
 			"form.workflowDescription": "Workflow task description (optional)",
 			"form.workflowStoryCode": "User story code (optional)",
 			"form.workflowStoryCodePlaceholder": "e.g. US-123 (optional)",
+			"form.workflowPathInputs": "File inputs (by path)",
+			"form.workflowPathInputsHint": "The path is read at every fire (no snapshot). Relative paths resolve against the task working directory; a missing file fails that launch. Your node parses the document itself.",
+			"form.workflowPathRequiredPlaceholder": "Required: file path, e.g. docs/today.md",
+			"form.workflowPathPlaceholder": "Optional, e.g. docs/today.md",
+			"form.workflowAttachments": "Attachments (no declaration needed)",
+			"form.workflowAttachmentsHint": "Uploaded files are stored in the scheduler's own directory and every fire receives this snapshot. Nodes read `${inputs.附件}` — the newline-joined absolute paths — and parse the documents themselves. Difference from the path fields above: attachments are snapshots, paths read whatever exists at fire time.",
+			"form.workflowAttachmentsPick": "Choose files",
+			"form.workflowAttachmentsUploading": "Uploading…",
+			"form.workflowAttachmentsNone": "No files chosen",
+			"form.workflowAttachmentsCount": "{n} selected",
+			"form.workflowAttachmentsFailed": "Attachment upload failed: ",
+			"btn.remove": "Remove",
+			"form.workflowNoFileInputs": "This workflow declares no file-typed input, so there is no path field. To hand local files to the workflow, use the attachments above (no declaration needed). Declare a file-typed parameter only when you need a path reference (produced by another job, always the newest file): open 「流程设计」→ the workflow → 「输入参数」 at the top → add a parameter of type 「文件」 and save.",
 			"run.pending": "Starting task…",
 			"run.promptStarted": "Prompt session created.",
 			"run.workflowStarted": "Workflow task started; view detailed status in workflow runs.",
@@ -210,6 +238,20 @@ window.__ModuleLoader__.load({
 		}
 		function deleteTask(id) {
 			return api(`/dsh-scheduler/tasks/${encodeURIComponent(id)}`, { method: "DELETE" });
+		}
+		/**
+		* Upload one attachment into the scheduler's persistent store (not the workflow plugin's
+		* 24h staging area): a scheduled task fires repeatedly and needs the bytes to survive.
+		* Returns the stored reference to put on the task input.
+		*/
+		function uploadAttachment(name, dataBase64) {
+			return api("/dsh-scheduler/attachments", {
+				method: "POST",
+				body: JSON.stringify({
+					name,
+					dataBase64
+				})
+			});
 		}
 		function toggleTask(id, enabled) {
 			return api(`/dsh-scheduler/tasks/${encodeURIComponent(id)}/toggle`, {
@@ -732,6 +774,17 @@ window.__ModuleLoader__.load({
 			const [workflowTitle, setWorkflowTitle] = (0, react.useState)("");
 			const [workflowDescription, setWorkflowDescription] = (0, react.useState)("");
 			const [workflowStoryCode, setWorkflowStoryCode] = (0, react.useState)("");
+			/** File-typed workflow inputs given by path (declared parameter name → path). */
+			const [workflowPathInputs, setWorkflowPathInputs] = (0, react.useState)({});
+			/**
+			* Attachments uploaded from the browser and persisted by the scheduler. Unlike the path
+			* fields above these are snapshots handed to every fire, and they need no workflow
+			* declaration (mirrors the workflow plugin's built-in attachments).
+			*/
+			const [workflowAttachments, setWorkflowAttachments] = (0, react.useState)([]);
+			const [attaching, setAttaching] = (0, react.useState)(0);
+			const [attachError, setAttachError] = (0, react.useState)(null);
+			const attachInputRef = (0, react.useRef)(null);
 			const [cwd, setCwd] = (0, react.useState)("");
 			const [enabled, setEnabled] = (0, react.useState)(true);
 			const [nextRun, setNextRun] = (0, react.useState)(null);
@@ -855,6 +908,9 @@ window.__ModuleLoader__.load({
 				setWorkflowTitle("");
 				setWorkflowDescription("");
 				setWorkflowStoryCode("");
+				setWorkflowPathInputs({});
+				setWorkflowAttachments([]);
+				setAttachError(null);
 				setEnabled(true);
 				setError(null);
 				setRunNotice(null);
@@ -877,6 +933,9 @@ window.__ModuleLoader__.load({
 				setWorkflowTitle(task.workflowTitle ?? "");
 				setWorkflowDescription(task.workflowDescription ?? "");
 				setWorkflowStoryCode(task.workflowStoryCode ?? "");
+				setWorkflowPathInputs(task.workflowPathInputs ?? {});
+				setWorkflowAttachments(task.workflowAttachments ?? []);
+				setAttachError(null);
 				if (task.executionKind === "knj-workflow") loadWorkflows();
 				setEnabled(task.enabled);
 				setError(null);
@@ -884,6 +943,52 @@ window.__ModuleLoader__.load({
 				setCronChecked(false);
 				setUpcoming([]);
 				setView("form");
+			};
+			/** Human-readable byte size for attachment chips. */
+			function formatBytes(size) {
+				if (size >= 1048576) return `${(size / 1024 / 1024).toFixed(1)} MB`;
+				if (size >= 1024) return `${Math.round(size / 1024)} KB`;
+				return `${size} B`;
+			}
+			/** File → base64 in chunks (large files must not blow the argument stack). */
+			const fileToBase64 = (file) => new Promise((resolve, reject) => {
+				const reader = new FileReader();
+				reader.onerror = () => reject(/* @__PURE__ */ new Error("读取文件失败"));
+				reader.onload = () => {
+					const bytes = new Uint8Array(reader.result);
+					let binary = "";
+					const CHUNK = 32768;
+					for (let i = 0; i < bytes.length; i += CHUNK) binary += String.fromCharCode.apply(null, bytes.subarray(i, i + CHUNK));
+					resolve(btoa(binary));
+				};
+				reader.readAsArrayBuffer(file);
+			});
+			/**
+			* Upload the chosen files into the scheduler's own store, appending the returned refs.
+			* Files are read from the event target **synchronously** by the caller: holding a live
+			* FileList across the async boundary loses it once the input value is reset.
+			*/
+			const uploadAttachments = async (files) => {
+				if (files.length === 0) return;
+				setAttachError(null);
+				setAttaching((n) => n + files.length);
+				for (const file of files) try {
+					const dataBase64 = await fileToBase64(file);
+					const ref = await uploadAttachment(file.name, dataBase64);
+					setWorkflowAttachments((list) => [...list, ref]);
+				} catch (e) {
+					setAttachError(`${file.name}：${e instanceof Error ? e.message : String(e)}`);
+				} finally {
+					setAttaching((n) => Math.max(0, n - 1));
+				}
+			};
+			const onAttachmentInputChange = (event) => {
+				const picked = event.currentTarget.files === null ? [] : Array.from(event.currentTarget.files);
+				event.currentTarget.value = "";
+				uploadAttachments(picked);
+			};
+			const removeAttachment = (index) => {
+				setWorkflowAttachments((list) => list.filter((_, i) => i !== index));
 			};
 			const openHistory = async (task) => {
 				try {
@@ -922,9 +1027,16 @@ window.__ModuleLoader__.load({
 					};
 					if (executionKind === "knj-workflow") {
 						input.workflowId = workflowId;
-						input.workflowTitle = workflowTitle;
+						if (workflowTitle.trim() !== "") input.workflowTitle = workflowTitle.trim();
 						input.workflowDescription = workflowDescription;
 						input.workflowStoryCode = workflowStoryCode;
+						input.workflowAttachments = workflowAttachments;
+						const paths = {};
+						for (const decl of selectedWorkflowFileInputs) {
+							const value = (workflowPathInputs[decl.name] ?? "").trim();
+							if (value !== "") paths[decl.name] = value;
+						}
+						if (Object.keys(paths).length > 0) input.workflowPathInputs = paths;
 					} else input.prompt = prompt;
 					if (type === "cron") input.cron = cron;
 					else if (type === "once") input.runAt = new Date(runAt).toISOString();
@@ -978,7 +1090,9 @@ window.__ModuleLoader__.load({
 			};
 			const cronOk = CRON_RE.test(cron.trim());
 			const triggerValid = type === "cron" ? cronOk : type === "once" ? runAt !== "" : Number.isInteger(everyMinutes) && everyMinutes >= 1;
-			const executionValid = executionKind === "knj-workflow" ? workflowId.trim() !== "" && workflowTitle.trim() !== "" && cwd.trim() !== "" : prompt.trim() !== "";
+			const selectedWorkflowFileInputs = (workflows.find((workflow) => workflow.id === workflowId)?.inputs ?? []).filter((decl) => decl.type === "file");
+			const missingRequiredPaths = selectedWorkflowFileInputs.filter((decl) => decl.required && (workflowPathInputs[decl.name] ?? "").trim() === "");
+			const executionValid = executionKind === "knj-workflow" ? workflowId.trim() !== "" && workflowTitle.trim() !== "" && cwd.trim() !== "" && missingRequiredPaths.length === 0 : prompt.trim() !== "";
 			const checkCron = async () => {
 				setError(null);
 				setCronChecked(true);
@@ -1397,33 +1511,44 @@ window.__ModuleLoader__.load({
 										executionKind === "knj-workflow" ? /* @__PURE__ */ (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [
 											/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
 												style: S.field,
-												children: [/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("label", {
-													style: S.label,
-													children: [t("form.workflowSelect"), " *"]
-												}), /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("select", {
-													style: {
-														...S.input,
-														height: 38
-													},
-													value: workflowId,
-													onChange: (e) => setWorkflowId(e.target.value),
-													children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("option", {
-														value: "",
-														children: t("form.workflowSelect")
-													}), workflows.map((workflow) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)("option", {
-														value: workflow.id,
-														children: workflow.name
-													}, workflow.id))]
-												})]
+												children: [
+													/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("label", {
+														style: S.label,
+														children: [t("form.workflowSelect"), " *"]
+													}),
+													/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("select", {
+														style: {
+															...S.input,
+															height: 38
+														},
+														value: workflowId,
+														onChange: (e) => setWorkflowId(e.target.value),
+														children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("option", {
+															value: "",
+															children: t("form.workflowSelect")
+														}), workflows.map((workflow) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)("option", {
+															value: workflow.id,
+															children: workflow.name
+														}, workflow.id))]
+													}),
+													workflowId.trim() !== "" && selectedWorkflowFileInputs.length === 0 && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+														style: {
+															...S.hint,
+															color: T.text3
+														},
+														children: t("form.workflowNoFileInputs")
+													})
+												]
 											}),
 											/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
 												style: S.field,
-												children: [/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("label", {
+												children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("label", {
 													style: S.label,
-													children: [t("form.workflowTitle"), " *"]
+													children: t("form.workflowTitle")
 												}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("input", {
 													style: S.input,
 													value: workflowTitle,
+													placeholder: t("form.workflowTitlePlaceholder"),
 													onChange: (e) => setWorkflowTitle(e.target.value)
 												})]
 											}),
@@ -1453,6 +1578,155 @@ window.__ModuleLoader__.load({
 													onChange: (e) => setWorkflowStoryCode(e.target.value),
 													placeholder: t("form.workflowStoryCodePlaceholder")
 												})]
+											}),
+											/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+												style: S.field,
+												children: [
+													/* @__PURE__ */ (0, react_jsx_runtime.jsx)("label", {
+														style: S.label,
+														children: t("form.workflowAttachments")
+													}),
+													/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+														style: {
+															...S.hint,
+															color: T.text3,
+															marginBottom: 8
+														},
+														children: t("form.workflowAttachmentsHint")
+													}),
+													/* @__PURE__ */ (0, react_jsx_runtime.jsx)("input", {
+														ref: attachInputRef,
+														type: "file",
+														multiple: true,
+														style: { display: "none" },
+														onChange: onAttachmentInputChange
+													}),
+													/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+														style: {
+															display: "flex",
+															alignItems: "center",
+															gap: 8,
+															flexWrap: "wrap"
+														},
+														children: [/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("button", {
+															type: "button",
+															style: {
+																...S.btn,
+																opacity: attaching > 0 ? .6 : 1
+															},
+															disabled: attaching > 0,
+															onClick: () => attachInputRef.current?.click(),
+															children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)(IconPlus, { size: 15 }), attaching > 0 ? t("form.workflowAttachmentsUploading") : t("form.workflowAttachmentsPick")]
+														}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+															style: {
+																fontSize: 12,
+																color: T.text3
+															},
+															children: workflowAttachments.length > 0 ? fmt(t("form.workflowAttachmentsCount"), { n: String(workflowAttachments.length) }) : t("form.workflowAttachmentsNone")
+														})]
+													}),
+													workflowAttachments.length > 0 && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+														style: {
+															display: "flex",
+															flexWrap: "wrap",
+															gap: 6,
+															marginTop: 8
+														},
+														children: workflowAttachments.map((att, index) => /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
+															style: {
+																display: "inline-flex",
+																alignItems: "center",
+																gap: 6,
+																fontSize: 12,
+																color: T.text2,
+																border: `1px solid ${T.border}`,
+																borderRadius: 999,
+																padding: "3px 6px 3px 10px"
+															},
+															children: [
+																att.name,
+																att.size === void 0 ? "" : ` (${formatBytes(att.size)})`,
+																/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+																	type: "button",
+																	title: t("btn.remove"),
+																	style: {
+																		border: 0,
+																		background: "transparent",
+																		color: T.text3,
+																		cursor: "pointer",
+																		fontSize: 12,
+																		lineHeight: 1,
+																		padding: "2px 4px"
+																	},
+																	onClick: () => removeAttachment(index),
+																	children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)(IconCross, { size: 12 })
+																})
+															]
+														}, att.uploadId))
+													}),
+													attachError !== null && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+														style: {
+															...S.hint,
+															color: T.danger,
+															marginTop: 6
+														},
+														children: [t("form.workflowAttachmentsFailed"), attachError]
+													})
+												]
+											}),
+											selectedWorkflowFileInputs.length > 0 && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+												style: S.field,
+												children: [
+													/* @__PURE__ */ (0, react_jsx_runtime.jsx)("label", {
+														style: S.label,
+														children: t("form.workflowPathInputs")
+													}),
+													/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+														style: {
+															...S.hint,
+															color: T.text3,
+															marginBottom: 8
+														},
+														children: t("form.workflowPathInputsHint")
+													}),
+													selectedWorkflowFileInputs.map((decl) => /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+														style: {
+															display: "flex",
+															alignItems: "center",
+															gap: 8,
+															marginBottom: 6
+														},
+														children: [
+															/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
+																style: {
+																	fontSize: 12,
+																	color: T.text2,
+																	minWidth: 110
+																},
+																children: [decl.label || decl.name, decl.required ? " *" : ""]
+															}),
+															/* @__PURE__ */ (0, react_jsx_runtime.jsx)("input", {
+																style: {
+																	...S.input,
+																	flex: 1
+																},
+																value: workflowPathInputs[decl.name] ?? "",
+																placeholder: decl.required ? t("form.workflowPathRequiredPlaceholder") : t("form.workflowPathPlaceholder"),
+																onChange: (e) => setWorkflowPathInputs({
+																	...workflowPathInputs,
+																	[decl.name]: e.target.value
+																})
+															}),
+															/* @__PURE__ */ (0, react_jsx_runtime.jsx)("code", {
+																style: {
+																	fontSize: 11,
+																	color: T.text3
+																},
+																children: `\${inputs.${decl.name}}`
+															})
+														]
+													}, decl.name))
+												]
 											})
 										] }) : /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
 											style: S.field,

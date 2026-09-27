@@ -8,6 +8,14 @@ export interface ExecuteResult {
     ms: number;
     error?: string;
 }
+/** Resolves persisted attachment ids to stored file paths (see attachments.ts). */
+export interface AttachmentResolver {
+    resolve(uploadId: string): Promise<{
+        uploadId: string;
+        name: string;
+        path: string;
+    } | null>;
+}
 /** Structural subset of the host `agents` service we use (see dsh-agent). */
 export interface AgentsServiceLike {
     create(options: {
@@ -23,4 +31,4 @@ export interface AgentsServiceLike {
         };
     }>;
 }
-export declare function executeTask(ctx: Context, task: TaskDef): Promise<ExecuteResult>;
+export declare function executeTask(ctx: Context, task: TaskDef, attachments?: AttachmentResolver): Promise<ExecuteResult>;

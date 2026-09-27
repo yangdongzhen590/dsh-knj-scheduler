@@ -19,6 +19,12 @@ export declare class TaskStore {
     private readonly dataDir;
     private readonly historyRetention;
     private tasks;
+    /**
+     * Called with attachment ids that no longer belong to any task (edit replaced them,
+     * or the task was deleted) so their stored bytes can be reclaimed. Best-effort:
+     * a reclaim failure must never fail the store operation itself.
+     */
+    onAttachmentDrop?: (uploadIds: string[]) => void;
     constructor(dataDir: string, historyRetention?: number);
     private tasksFile;
     private historyFile;

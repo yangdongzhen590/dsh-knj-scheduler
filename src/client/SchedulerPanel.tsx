@@ -9,7 +9,7 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import type { Dict } from './locales.ts'
 import * as api from './api.ts'
-import type { ExecutionKind, HistoryEntry, TaskInput, TaskType, TaskView, WorkflowChoice } from './api.ts'
+import type { ExecutionKind, HistoryEntry, TaskInput, TaskType, TaskView, WorkflowAttachmentRef, WorkflowChoice } from './api.ts'
 import { IconCheck, IconChevronLeft, IconClock, IconCross, IconEdit, IconHistory, IconPlay, IconPlus, IconRefresh, IconTrash } from './icons.tsx'
 import { PAGE_SIZES, pageSlice, fmt } from './pager.ts'
 import type { SessionsService, WorkspacesService } from './index.ts'
@@ -157,6 +157,17 @@ export function SchedulerPanel({ onClose, t, sessions, workspaces }: SchedulerPa
   const [workflowTitle, setWorkflowTitle] = useState('')
   const [workflowDescription, setWorkflowDescription] = useState('')
   const [workflowStoryCode, setWorkflowStoryCode] = useState('')
+  /** File-typed workflow inputs given by path (declared parameter name → path). */
+  const [workflowPathInputs, setWorkflowPathInputs] = useState<Record<string, string>>({})
+  /**
+   * Attachments uploaded from the browser and persisted by the scheduler. Unlike the path
+   * fields above these are snapshots handed to every fire, and they need no workflow
+   * declaration (mirrors the workflow plugin's built-in attachments).
+   */
+  const [workflowAttachments, setWorkflowAttachments] = useState<WorkflowAttachmentRef[]>([])
+  const [attaching, setAttaching] = useState(0)
+  const [attachError, setAttachError] = useState<string | null>(null)
+  const attachInputRef = useRef<HTMLInputElement | null>(null)
   const [cwd, setCwd] = useState('')
   const [enabled, setEnabled] = useState(true)
   const [nextRun, setNextRun] = useState<string | null>(null)
@@ -267,10 +278,63 @@ export function SchedulerPanel({ onClose, t, sessions, workspaces }: SchedulerPa
     catch (e) { setError(e instanceof Error ? e.message : String(e)) }
   }
   const openNew = (): void => {
-    setEditId(null); setName(''); setType('cron'); setCron(''); setRunAt(''); setEveryMinutes(60); setCwd(''); setPrompt(''); setExecutionKind('prompt-session'); setWorkflowId(''); setWorkflowTitle(''); setWorkflowDescription(''); setWorkflowStoryCode(''); setEnabled(true); setError(null); setRunNotice(null); setNextRun(null); setCronChecked(false); setUpcoming([]); setView('form')
+    setEditId(null); setName(''); setType('cron'); setCron(''); setRunAt(''); setEveryMinutes(60); setCwd(''); setPrompt(''); setExecutionKind('prompt-session'); setWorkflowId(''); setWorkflowTitle(''); setWorkflowDescription(''); setWorkflowStoryCode(''); setWorkflowPathInputs({}); setWorkflowAttachments([]); setAttachError(null); setEnabled(true); setError(null); setRunNotice(null); setNextRun(null); setCronChecked(false); setUpcoming([]); setView('form')
   }
   const openEdit = (task: TaskView): void => {
-    setEditId(task.id); setName(task.name); setType(task.type); setCron(task.cron); setRunAt(task.type === 'once' && task.runAt ? toLocalInput(task.runAt) : ''); setEveryMinutes(task.everyMinutes ?? 60); setCwd(task.cwd ?? ''); setPrompt(task.prompt ?? ''); setExecutionKind(task.executionKind); setWorkflowId(task.workflowId ?? ''); setWorkflowTitle(task.workflowTitle ?? ''); setWorkflowDescription(task.workflowDescription ?? ''); setWorkflowStoryCode(task.workflowStoryCode ?? ''); if (task.executionKind === 'knj-workflow') void loadWorkflows(); setEnabled(task.enabled); setError(null); setRunNotice(null); setCronChecked(false); setUpcoming([]); setView('form')
+    setEditId(task.id); setName(task.name); setType(task.type); setCron(task.cron); setRunAt(task.type === 'once' && task.runAt ? toLocalInput(task.runAt) : ''); setEveryMinutes(task.everyMinutes ?? 60); setCwd(task.cwd ?? ''); setPrompt(task.prompt ?? ''); setExecutionKind(task.executionKind); setWorkflowId(task.workflowId ?? ''); setWorkflowTitle(task.workflowTitle ?? ''); setWorkflowDescription(task.workflowDescription ?? ''); setWorkflowStoryCode(task.workflowStoryCode ?? ''); setWorkflowPathInputs(task.workflowPathInputs ?? {}); setWorkflowAttachments(task.workflowAttachments ?? []); setAttachError(null); if (task.executionKind === 'knj-workflow') void loadWorkflows(); setEnabled(task.enabled); setError(null); setRunNotice(null); setCronChecked(false); setUpcoming([]); setView('form')
+  }
+
+/** Human-readable byte size for attachment chips. */
+function formatBytes(size: number): string {
+  if (size >= 1024 * 1024) return `${(size / 1024 / 1024).toFixed(1)} MB`
+  if (size >= 1024) return `${Math.round(size / 1024)} KB`
+  return `${size} B`
+}
+
+/** File → base64 in chunks (large files must not blow the argument stack). */
+  const fileToBase64 = (file: File): Promise<string> => new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onerror = () => reject(new Error('读取文件失败'))
+    reader.onload = () => {
+      const bytes = new Uint8Array(reader.result as ArrayBuffer)
+      let binary = ''
+      const CHUNK = 0x8000
+      for (let i = 0; i < bytes.length; i += CHUNK) binary += String.fromCharCode.apply(null, bytes.subarray(i, i + CHUNK) as unknown as number[])
+      resolve(btoa(binary))
+    }
+    reader.readAsArrayBuffer(file)
+  })
+
+  /**
+   * Upload the chosen files into the scheduler's own store, appending the returned refs.
+   * Files are read from the event target **synchronously** by the caller: holding a live
+   * FileList across the async boundary loses it once the input value is reset.
+   */
+  const uploadAttachments = async (files: File[]): Promise<void> => {
+    if (files.length === 0) return
+    setAttachError(null)
+    setAttaching((n) => n + files.length)
+    for (const file of files) {
+      try {
+        const dataBase64 = await fileToBase64(file)
+        const ref = await api.uploadAttachment(file.name, dataBase64)
+        setWorkflowAttachments((list) => [...list, ref])
+      } catch (e) {
+        setAttachError(`${file.name}：${e instanceof Error ? e.message : String(e)}`)
+      } finally {
+        setAttaching((n) => Math.max(0, n - 1))
+      }
+    }
+  }
+
+  const onAttachmentInputChange = (event: React.ChangeEvent<HTMLInputElement>): void => {
+    const picked = event.currentTarget.files === null ? [] : Array.from(event.currentTarget.files)
+    event.currentTarget.value = ''
+    void uploadAttachments(picked)
+  }
+
+  const removeAttachment = (index: number): void => {
+    setWorkflowAttachments((list) => list.filter((_, i) => i !== index))
   }
   const openHistory = async (task: TaskView): Promise<void> => {
     try {
@@ -303,9 +367,19 @@ export function SchedulerPanel({ onClose, t, sessions, workspaces }: SchedulerPa
       const input: TaskInput = { name, type, executionKind, enabled }
       if (executionKind === 'knj-workflow') {
         input.workflowId = workflowId
-        input.workflowTitle = workflowTitle
+        // 标题可留空：workflow 插件会按描述派生（与「新建任务」表单一致），留空时不提交该字段
+        if (workflowTitle.trim() !== '') input.workflowTitle = workflowTitle.trim()
         input.workflowDescription = workflowDescription
         input.workflowStoryCode = workflowStoryCode
+        // 附件（快照，持久化在调度器自己目录里，每次触发重新交给 workflow 插件）
+        input.workflowAttachments = workflowAttachments
+        // 只提交非空路径（参数名 → 路径）；工作流侧在启动前按 cwd 解析成绝对路径并校验存在
+        const paths: Record<string, string> = {}
+        for (const decl of selectedWorkflowFileInputs) {
+          const value = (workflowPathInputs[decl.name] ?? '').trim()
+          if (value !== '') paths[decl.name] = value
+        }
+        if (Object.keys(paths).length > 0) input.workflowPathInputs = paths
       } else {
         input.prompt = prompt
       }
@@ -356,8 +430,11 @@ export function SchedulerPanel({ onClose, t, sessions, workspaces }: SchedulerPa
 
   const cronOk = CRON_RE.test(cron.trim())
   const triggerValid = type === 'cron' ? cronOk : type === 'once' ? runAt !== '' : Number.isInteger(everyMinutes) && everyMinutes >= 1
+  // 选中工作流声明的「文件」入参：表单据此渲染路径字段、并在提交前要求必填项非空
+  const selectedWorkflowFileInputs = (workflows.find((workflow) => workflow.id === workflowId)?.inputs ?? []).filter((decl) => decl.type === 'file')
+  const missingRequiredPaths = selectedWorkflowFileInputs.filter((decl) => decl.required && (workflowPathInputs[decl.name] ?? '').trim() === '')
   const executionValid = executionKind === 'knj-workflow'
-    ? workflowId.trim() !== '' && workflowTitle.trim() !== '' && cwd.trim() !== ''
+    ? workflowId.trim() !== '' && workflowTitle.trim() !== '' && cwd.trim() !== '' && missingRequiredPaths.length === 0
     : prompt.trim() !== ''
 
   const checkCron = async (): Promise<void> => {
@@ -540,10 +617,14 @@ export function SchedulerPanel({ onClose, t, sessions, workspaces }: SchedulerPa
                       <option value="">{t('form.workflowSelect')}</option>
                       {workflows.map((workflow) => <option key={workflow.id} value={workflow.id}>{workflow.name}</option>)}
                     </select>
+                    {/* 没有声明文件入参时不该说"没入口"——附件本来就不需要声明 */}
+                    {workflowId.trim() !== '' && selectedWorkflowFileInputs.length === 0 && (
+                      <div style={{ ...S.hint, color: T.text3 }}>{t('form.workflowNoFileInputs')}</div>
+                    )}
                   </div>
                   <div style={S.field}>
-                    <label style={S.label}>{t('form.workflowTitle')} *</label>
-                    <input style={S.input} value={workflowTitle} onChange={(e) => setWorkflowTitle(e.target.value)} />
+                    <label style={S.label}>{t('form.workflowTitle')}</label>
+                    <input style={S.input} value={workflowTitle} placeholder={t('form.workflowTitlePlaceholder')} onChange={(e) => setWorkflowTitle(e.target.value)} />
                   </div>
                   <div style={S.field}>
                     <label style={S.label}>{t('form.workflowDescription')}</label>
@@ -553,6 +634,74 @@ export function SchedulerPanel({ onClose, t, sessions, workspaces }: SchedulerPa
                     <label style={S.label}>{t('form.workflowStoryCode')}</label>
                     <input style={S.input} value={workflowStoryCode} onChange={(e) => setWorkflowStoryCode(e.target.value)} placeholder={t('form.workflowStoryCodePlaceholder')} />
                   </div>
+                  {/* 附件：不需要工作流声明，多选；每次触发把这份快照交给流程（节点用 ${inputs.附件} 拿路径） */}
+                  <div style={S.field}>
+                    <label style={S.label}>{t('form.workflowAttachments')}</label>
+                    <div style={{ ...S.hint, color: T.text3, marginBottom: 8 }}>{t('form.workflowAttachmentsHint')}</div>
+                    <input
+                      ref={attachInputRef}
+                      type="file"
+                      multiple
+                      style={{ display: 'none' }}
+                      onChange={onAttachmentInputChange}
+                    />
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                      <button
+                        type="button"
+                        style={{ ...S.btn, opacity: attaching > 0 ? 0.6 : 1 }}
+                        disabled={attaching > 0}
+                        onClick={() => attachInputRef.current?.click()}
+                      >
+                        <IconPlus size={15} />
+                        {attaching > 0 ? t('form.workflowAttachmentsUploading') : t('form.workflowAttachmentsPick')}
+                      </button>
+                      <span style={{ fontSize: 12, color: T.text3 }}>
+                        {workflowAttachments.length > 0
+                          ? fmt(t('form.workflowAttachmentsCount'), { n: String(workflowAttachments.length) })
+                          : t('form.workflowAttachmentsNone')}
+                      </span>
+                    </div>
+                    {workflowAttachments.length > 0 && (
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 8 }}>
+                        {workflowAttachments.map((att, index) => (
+                          <span key={att.uploadId} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12, color: T.text2, border: `1px solid ${T.border}`, borderRadius: 999, padding: '3px 6px 3px 10px' }}>
+                            {att.name}{att.size === undefined ? '' : ` (${formatBytes(att.size)})`}
+                            <button
+                              type="button"
+                              title={t('btn.remove')}
+                              style={{ border: 0, background: 'transparent', color: T.text3, cursor: 'pointer', fontSize: 12, lineHeight: 1, padding: '2px 4px' }}
+                              onClick={() => removeAttachment(index)}
+                            >
+                              <IconCross size={12} />
+                            </button>
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                    {attachError !== null && (
+                      <div style={{ ...S.hint, color: T.danger, marginTop: 6 }}>{t('form.workflowAttachmentsFailed')}{attachError}</div>
+                    )}
+                  </div>
+                  {selectedWorkflowFileInputs.length > 0 && (
+                    <div style={S.field}>
+                      <label style={S.label}>{t('form.workflowPathInputs')}</label>
+                      <div style={{ ...S.hint, color: T.text3, marginBottom: 8 }}>{t('form.workflowPathInputsHint')}</div>
+                      {selectedWorkflowFileInputs.map((decl) => (
+                        <div key={decl.name} style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+                          <span style={{ fontSize: 12, color: T.text2, minWidth: 110 }}>
+                            {decl.label || decl.name}{decl.required ? ' *' : ''}
+                          </span>
+                          <input
+                            style={{ ...S.input, flex: 1 }}
+                            value={workflowPathInputs[decl.name] ?? ''}
+                            placeholder={decl.required ? t('form.workflowPathRequiredPlaceholder') : t('form.workflowPathPlaceholder')}
+                            onChange={(e) => setWorkflowPathInputs({ ...workflowPathInputs, [decl.name]: e.target.value })}
+                          />
+                          <code style={{ fontSize: 11, color: T.text3 }}>{`\${inputs.${decl.name}}`}</code>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </>
               ) : (
                 <div style={S.field}>

@@ -1,6 +1,6 @@
 {
   "name": "dsh-scheduler",
-  "version": "2026.9.72",
+  "version": "2026.9.192",
   "description": "定时任务调度器：按 Cron 自动新建 DSH 会话并注入提示词执行。Scheduled tasks for DeepSeek Harness: create a new session with your prompt on a cron schedule.",
   "type": "module",
   "main": "lib/index.js",
@@ -81,6 +81,7 @@
     "@deepseek-ai/dsh-client-ui-primitives": "0.1.2-rc.1",
     "@deepseek-ai/dsh-client-ui-slots": "0.1.2-rc.1",
     "@deepseek-ai/dsh-llm": "0.1.2-rc.1",
+    "@deepseek-ai/dsh-scope": "^0.1.2-rc.1",
     "@deepseek-ai/dsh-session": "0.1.2-rc.1",
     "@types/node": "^22.0.0",
     "@types/react": "~18.3.1",

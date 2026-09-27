@@ -13,6 +13,8 @@ import type { TaskScheduler } from './scheduler.ts'
 import { executeTask } from './executor.ts'
 import type { TaskDef, TaskInput } from './types.ts'
 import { validateTask, validateTaskInput } from './types.ts'
+import type { AttachmentStore } from './attachments.ts'
+import { ATTACHMENT_BODY_BYTES } from './attachments.ts'
 
 export interface WebServerService {
   register(route: {
@@ -34,11 +36,12 @@ export function mountSchedulerRoutes(
   ctx: Context,
   store: TaskStore,
   scheduler: TaskScheduler,
+  attachments?: AttachmentStore,
 ): () => void {
   /** Fire a task through the executor and record the outcome. */
   const onFire = async (task: TaskDef): Promise<void> => {
     const id = store.appendHistory({ taskId: task.id, at: new Date().toISOString(), status: 'running' })
-    const result = await executeTask(ctx, task)
+    const result = await executeTask(ctx, task, attachments)
     if (id !== null) {
       store.updateHistory(id, {
         status: result.status,
@@ -105,6 +108,17 @@ export function mountSchedulerRoutes(
         return
       }
 
+      // 附件上传（调度器自己的持久化存储，不是 workflow 插件的 24h 暂存）。
+      // 独立路由 + 独立上限：建任务请求体的上限只有 64KB，容不下 base64 文件内容。
+      if (path === `${BASE}/attachments` && method === 'POST') {
+        if (!sameOrigin(request)) return sendJson(response, 403, { error: 'untrusted origin / 非可信来源' })
+        if (attachments === undefined) return sendJson(response, 503, { error: '附件存储不可用 / attachment store unavailable' })
+        const body = await readJsonBody(request, ATTACHMENT_BODY_BYTES)
+        const ref = await attachments.put(body as { name?: unknown; dataBase64?: unknown })
+        sendJson(response, 200, ref)
+        return
+      }
+
       if (path === `${BASE}/workflows` && method === 'GET') {
         const workflow = ctx.get('knjWorkflowScheduler') as { listWorkflows?: () => Promise<unknown[]> } | undefined
         if (workflow === undefined || typeof workflow.listWorkflows !== 'function') {
@@ -160,7 +174,7 @@ export function mountSchedulerRoutes(
         const task = store.get(runMatch[1] as string)
         if (!task) return sendJson(response, 404, { error: 'task not found / 任务不存在' })
         const id = store.appendHistory({ taskId: task.id, at: new Date().toISOString(), status: 'running' })
-        const result = await executeTask(ctx, task)
+        const result = await executeTask(ctx, task, attachments)
         if (id !== null) {
           store.updateHistory(id, {
             status: result.status,
@@ -208,6 +222,16 @@ export function mountSchedulerRoutes(
 
       sendJson(response, 404, { error: 'not found' })
     } catch (error) {
+      // 用户侧问题（附件超限、JSON 坏了）不该报成 500：路由层已经有 code 就照实回
+      const code = (error as Error & { code?: string }).code
+      if (code === 'PAYLOAD_TOO_LARGE') {
+        sendJson(response, 413, { error: '文件过大或请求体过大 / payload too large' })
+        return
+      }
+      if (code === 'BAD_JSON') {
+        sendJson(response, 400, { error: 'JSON 解析失败 / invalid JSON body' })
+        return
+      }
       sendJson(response, 500, { error: error instanceof Error ? error.message : String(error) })
     }
   }
@@ -249,13 +273,13 @@ function sameOrigin(request: IncomingMessage): boolean {
   }
 }
 
-async function readJsonBody(request: IncomingMessage): Promise<unknown> {
+async function readJsonBody(request: IncomingMessage, maxBytes = MAX_BODY_BYTES): Promise<unknown> {
   const chunks: Buffer[] = []
   let total = 0
   for await (const chunk of request) {
     const buf = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)
     total += buf.length
-    if (total > MAX_BODY_BYTES) {
+    if (total > maxBytes) {
       const error = new Error('request body too large / 请求体过大')
       ;(error as Error & { code?: string }).code = 'PAYLOAD_TOO_LARGE'
       throw error

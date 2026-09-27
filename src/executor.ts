@@ -20,7 +20,31 @@ export interface ExecuteResult {
 }
 
 interface KnjWorkflowSchedulerService {
-  createAndStartScheduledTask(input: { workflowId: string; title: string; description?: string; storyCode?: string; cwd: string }): Promise<{ taskId: string; parentSessionId?: string; runId: string }>
+  createAndStartScheduledTask(input: {
+    /** Omitted when the task has no explicit title: the workflow plugin derives one from the description. */
+    title?: string
+    description?: string
+    storyCode?: string
+    cwd: string
+    workflowId: string
+    /** File-typed inputs given by path (parameter name → path); read when the schedule fires. */
+    pathInputs?: Record<string, string>
+    /** Attachment references staged for THIS fire (see stageAttachments). */
+    attachments?: Array<{ uploadId: string; name?: string }>
+    /** Marks the staged attachments as scheduler-owned: the workflow plugin must not discard them. */
+    attachmentsAreReusable?: boolean
+  }): Promise<{ taskId: string; parentSessionId?: string; runId: string }>
+  /**
+   * Put the scheduler's persisted attachment files into the workflow plugin's upload staging,
+   * returning fresh references for one fire. Required because that staging is a one-shot
+   * hand-off and a scheduled task fires repeatedly.
+   */
+  stageAttachments?(input: { files: Array<{ path: string; name?: string }> }): Promise<Array<{ uploadId: string; name: string; size: number }>>
+}
+
+/** Resolves persisted attachment ids to stored file paths (see attachments.ts). */
+export interface AttachmentResolver {
+  resolve(uploadId: string): Promise<{ uploadId: string; name: string; path: string } | null>
 }
 
 /** The default model selection the deployment provides for model-less agents. */
@@ -35,7 +59,7 @@ export interface AgentsServiceLike {
   create(options: { sessionId: SessionId; meta?: { cwd: string }; setup?: (agentCtx: Context) => void }): Promise<{ agent: { id: SessionId; followup(message: unknown): void } }>
 }
 
-export async function executeTask(ctx: Context, task: TaskDef): Promise<ExecuteResult> {
+export async function executeTask(ctx: Context, task: TaskDef, attachments?: AttachmentResolver): Promise<ExecuteResult> {
   const started = Date.now()
   let agents: AgentsServiceLike | undefined
   try {
@@ -44,12 +68,38 @@ export async function executeTask(ctx: Context, task: TaskDef): Promise<ExecuteR
       if (workflow === undefined || typeof workflow.createAndStartScheduledTask !== 'function') {
         return { status: 'failed', ms: Date.now() - started, error: 'dsh-knj-workflow scheduler service is unavailable' }
       }
+      // 附件：调度器存的是持久化文件，workflow 插件的暂存是**一次性交接**，所以每次触发都要
+      // 重新把文件放回它的暂存区换一份新的 uploadId；否则第二次触发会因暂存已清而拒绝启动。
+      let fireAttachments: Array<{ uploadId: string; name?: string }> | undefined
+      const refs = task.workflowAttachments ?? []
+      if (refs.length > 0) {
+        if (attachments === undefined) {
+          return { status: 'failed', ms: Date.now() - started, error: '附件存储不可用 / attachment store unavailable' }
+        }
+        if (typeof workflow.stageAttachments !== 'function') {
+          return { status: 'failed', ms: Date.now() - started, error: 'dsh-knj-workflow 缺少 stageAttachments（请更新该插件后重启 dsh web）' }
+        }
+        const files: Array<{ path: string; name?: string }> = []
+        for (const ref of refs) {
+          const found = await attachments.resolve(ref.uploadId)
+          if (found === null) {
+            return { status: 'failed', ms: Date.now() - started, error: `附件已丢失：${ref.name}（${ref.uploadId}）。请重新在调度器里选择文件` }
+          }
+          files.push({ path: found.path, name: ref.name || found.name })
+        }
+        fireAttachments = await workflow.stageAttachments({ files })
+      }
       const launch = await workflow.createAndStartScheduledTask({
         workflowId: task.workflowId!,
-        title: task.workflowTitle!,
+        // 标题可缺省：留空时由 workflow 插件按描述派生（与「新建任务」表单同口径）
+        ...(task.workflowTitle ? { title: task.workflowTitle } : {}),
         ...(task.workflowDescription ? { description: task.workflowDescription } : {}),
         storyCode: task.workflowStoryCode,
         cwd: task.cwd!,
+        // Path-typed file inputs: forwarded verbatim — the workflow plugin resolves relative
+        // paths against the task's cwd and verifies the file exists before the run starts.
+        ...(task.workflowPathInputs ? { pathInputs: task.workflowPathInputs } : {}),
+        ...(fireAttachments ? { attachments: fireAttachments, attachmentsAreReusable: true } : {}),
       })
       return { status: 'created', workflowTaskId: launch.taskId, ms: Date.now() - started }
     }

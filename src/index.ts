@@ -8,6 +8,7 @@ import type { Context } from '@deepseek-ai/cordis'
 import { TaskStore } from './store.ts'
 import { TaskScheduler } from './scheduler.ts'
 import { mountSchedulerRoutes, type SchedulerHost } from './routes.ts'
+import { AttachmentStore } from './attachments.ts'
 
 export const name = 'dsh-scheduler'
 
@@ -26,8 +27,17 @@ export function apply(ctx: Context, config?: Config): void {
     const dataDir = config?.dataDir ?? defaultDataDir()
     const store = new TaskStore(dataDir, config?.historyRetention ?? 500)
     store.load()
+    // 附件持久化在调度器自己的数据目录里（跨触发存活），与 workflow 插件的一次性暂存无关。
+    const attachments = new AttachmentStore(join(dataDir, 'attachments'))
+    store.onAttachmentDrop = (uploadIds) => {
+      // 被编辑替换（或随任务删除）的附件不再被任何任务引用，直接回收存储。
+      // best-effort：回收失败不影响保存/删除本身。
+      for (const id of uploadIds) {
+        void attachments.discard(id).catch(() => {})
+      }
+    }
     const scheduler = new TaskScheduler(config?.timezone)
-    const disposeRoutes = mountSchedulerRoutes(host, ctx, store, scheduler)
+    const disposeRoutes = mountSchedulerRoutes(host, ctx, store, scheduler, attachments)
     return () => {
       disposeRoutes()
       scheduler.clear()

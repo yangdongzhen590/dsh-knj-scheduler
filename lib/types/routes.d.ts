@@ -8,6 +8,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { Context } from '@deepseek-ai/cordis';
 import type { TaskStore } from './store.ts';
 import type { TaskScheduler } from './scheduler.ts';
+import type { AttachmentStore } from './attachments.ts';
 export interface WebServerService {
     register(route: {
         kind: 'exact' | 'prefix';
@@ -18,4 +19,4 @@ export interface WebServerService {
 export interface SchedulerHost {
     webServer: WebServerService;
 }
-export declare function mountSchedulerRoutes(host: SchedulerHost, ctx: Context, store: TaskStore, scheduler: TaskScheduler): () => void;
+export declare function mountSchedulerRoutes(host: SchedulerHost, ctx: Context, store: TaskStore, scheduler: TaskScheduler, attachments?: AttachmentStore): () => void;
