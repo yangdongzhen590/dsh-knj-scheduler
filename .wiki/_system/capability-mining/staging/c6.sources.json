@@ -1,0 +1,9 @@
+[
+  { "path": "src/client/index.ts", "symbols": ["apply", "slots", "SchedulerEntry", "UiWorkspaceService"] },
+  { "path": "src/client/SchedulerEntry.tsx", "symbols": ["SchedulerEntry", "SchedulerPanel"] },
+  { "path": "src/client/SchedulerPanel.tsx", "symbols": ["SchedulerPanel", "executionValid", "save", "CRON_RE"] },
+  { "path": "src/client/api.ts", "symbols": ["api", "createTask", "runTask"] },
+  { "path": "src/client/pager.ts", "symbols": ["pageSlice", "fmt", "PAGE_SIZES"] },
+  { "path": "src/client/locales.ts", "symbols": ["zh", "en"] },
+  { "path": "test/client-session-nav.test.mjs", "symbols": ["UI_WORKSPACE_OPEN", "inject"] }
+]

@@ -4,6 +4,10 @@ release/
 target/
 .DS_Store
 
+# Local build toolchain (pnpm installs the bundler/typescript here so the
+# repository itself stays dependency-free; node_modules is a junction to it).
+.tools/
+
 # JetBrains IDE state
 .idea/
 

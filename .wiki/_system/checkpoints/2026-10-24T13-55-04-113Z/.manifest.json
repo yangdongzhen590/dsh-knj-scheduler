@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "sources": {
+    "capability-mining:support-croner-protect": {
+      "content_hash": "62f0911bffb9ffbcc55fc08d518fff8269f6837d03eec05c2b4bb274e294d446",
+      "last_ingested": "2026-10-24T13:54:50.814Z",
+      "pages_produced": [
+        "croner-protect-与非重入触发"
+      ]
+    }
+  }
+}

@@ -1,0 +1,26 @@
+# 功能映射 — 人工策展的功能聚类（generate-task-list.mjs 优先读取本文件）
+#
+# 依据：.wiki/_system/capability-mining/entries.json（enumerate-entries.mjs 确定性产出，5 条 route）
+# 加上读代码确认的入口事实。凡枚举器未覆盖、由人工补充的入口，一律以 `manual:` 前缀标注，
+# 以便区分「脚本产出」与「人工判断」：
+#   - /tasks/:id、/tasks/:id/toggle、/tasks/:id/run、/tasks/:id/history 用正则匹配
+#     （src/routes.ts:156-159），不匹配枚举器的 `${BASE}/xxx` 模板串；
+#   - 边栏入口是客户端 slot 注册（src/client/index.ts:101-104），枚举器四类适配器不含 slot 形态。
+- name: 任务定义与持久化
+  entries: [route:tasks, manual:route:/tasks/:id]
+  modules: [src/routes.ts, src/store.ts, src/types.ts]
+- name: 触发计划与下次执行
+  entries: [route:preview]
+  modules: [src/scheduler.ts, src/routes.ts, src/types.ts]
+- name: 到点执行与提示词会话
+  entries: [manual:route:/tasks/:id/run]
+  modules: [src/executor.ts, src/scheduler.ts, src/routes.ts]
+- name: 执行历史与状态流转
+  entries: [route:history, manual:route:/tasks/:id/history]
+  modules: [src/store.ts, src/routes.ts, src/types.ts]
+- name: 附件与工作流联动
+  entries: [route:attachments, route:workflows]
+  modules: [src/attachments.ts, src/executor.ts, src/types.ts, src/routes.ts]
+- name: 边栏面板与表单
+  entries: [manual:slot:knj.menu.item]
+  modules: [src/client/index.ts, src/client/SchedulerEntry.tsx, src/client/SchedulerPanel.tsx, src/client/api.ts, src/client/locales.ts, src/client/pager.ts]

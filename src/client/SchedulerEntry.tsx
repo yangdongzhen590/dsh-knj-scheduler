@@ -4,7 +4,7 @@
  */
 import { useState } from 'react'
 import type { Dict } from './locales.ts'
-import type { SessionsService, WorkspacesService } from './index.ts'
+import type { SessionsService, UiWorkspaceService, WorkspacesService } from './index.ts'
 import { SchedulerPanel } from './SchedulerPanel.tsx'
 import { IconClock } from './icons.tsx'
 
@@ -12,9 +12,12 @@ export interface SchedulerEntryProps {
   t: (key: keyof Dict) => string
   sessions?: SessionsService
   workspaces?: WorkspacesService
+  uiWorkspace?: UiWorkspaceService
+  resolveUiWorkspace?: () => UiWorkspaceService | undefined
+  describeContext?: () => string
 }
 
-export function SchedulerEntry({ t, sessions, workspaces }: SchedulerEntryProps) {
+export function SchedulerEntry({ t, sessions, workspaces, uiWorkspace, resolveUiWorkspace, describeContext }: SchedulerEntryProps) {
   const [open, setOpen] = useState(false)
   return (
     <>
@@ -50,7 +53,15 @@ export function SchedulerEntry({ t, sessions, workspaces }: SchedulerEntryProps)
         </span>
         <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', flex: 1, textAlign: 'left' }}>{t('entry.label')}</span>
       </button>
-      {open && <SchedulerPanel onClose={() => setOpen(false)} t={t} sessions={sessions} workspaces={workspaces} />}
+      {open && <SchedulerPanel
+        onClose={() => setOpen(false)}
+        t={t}
+        sessions={sessions}
+        workspaces={workspaces}
+        uiWorkspace={uiWorkspace}
+        resolveUiWorkspace={resolveUiWorkspace}
+        describeContext={describeContext}
+      />}
     </>
   )
 }

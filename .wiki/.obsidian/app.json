@@ -1,0 +1,9 @@
+{
+  "userIgnoreFilters": [
+    "_system/",
+    "_meta/",
+    "_raw/",
+    "wiki-export/",
+    ".manifest.json"
+  ]
+}

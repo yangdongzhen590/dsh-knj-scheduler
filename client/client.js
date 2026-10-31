@@ -6,7 +6,7 @@ window.__ModuleLoader__.load({
 		Object.defineProperty(exports, Symbol.toStringTag, { value: "Module" });
 		let react = require("react");
 		let react_jsx_runtime = require("react/jsx-runtime");
-		//#region src/client/locales.ts
+		// src/client/locales.ts
 		/**
 		* Dictionary for the dsh-scheduler client bundle. Chinese is the key-set
 		* source of truth; English mirrors it.
@@ -95,7 +95,6 @@ window.__ModuleLoader__.load({
 			"tab.tasks": "任务列表",
 			"tab.executions": "执行记录",
 			"history.all.retention": "保留上限 500 条",
-			"session.openCrossWorkspace": "该会话属于工作区 {path}，请先切换到该工作区再打开",
 			"session.openUnregistered": "该会话位于未注册的工作区（{path}），无法直接打开；请从该目录启动 dsh web 后再查看执行产出",
 			"pager.prev": "上一页",
 			"pager.next": "下一页",
@@ -193,7 +192,6 @@ window.__ModuleLoader__.load({
 			"tab.tasks": "Tasks",
 			"tab.executions": "Executions",
 			"history.all.retention": "retained up to 500 entries",
-			"session.openCrossWorkspace": "This session belongs to workspace {path} — switch to it first to open",
 			"session.openUnregistered": "This session lives in an unregistered workspace ({path}) and cannot be opened here; start dsh web from that directory to view it",
 			"pager.prev": "Previous",
 			"pager.next": "Next",
@@ -207,8 +205,7 @@ window.__ModuleLoader__.load({
 			"error.untrusted": "Untrusted origin",
 			"next.unknown": "—"
 		};
-		//#endregion
-		//#region src/client/api.ts
+		// src/client/api.ts
 		async function api(path, init) {
 			const response = await fetch(path, {
 				headers: { "content-type": "application/json" },
@@ -278,8 +275,7 @@ window.__ModuleLoader__.load({
 			if (params.everyMinutes !== void 0) q.set("everyMinutes", String(params.everyMinutes));
 			return api(`/dsh-scheduler/preview?${q.toString()}`);
 		}
-		//#endregion
-		//#region src/client/icons.tsx
+		// src/client/icons.tsx
 		function Svg({ size = 16, children }) {
 			return /* @__PURE__ */ (0, react_jsx_runtime.jsx)("svg", {
 				width: size,
@@ -370,8 +366,7 @@ window.__ModuleLoader__.load({
 				children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)("path", { d: "M10 3.5L5.5 8l4.5 4.5" })
 			});
 		}
-		//#endregion
-		//#region src/client/pager.ts
+		// src/client/pager.ts
 		/**
 		* Client-side pagination helpers for the history views. Pure functions with
 		* no React dependency so they stay unit-testable (pager.test.mjs).
@@ -398,8 +393,7 @@ window.__ModuleLoader__.load({
 		function fmt(template, vars) {
 			return template.replace(/\{(\w+)\}/g, (_, key) => String(vars[key] ?? `{${key}}`));
 		}
-		//#endregion
-		//#region src/client/SchedulerPanel.tsx
+		// src/client/SchedulerPanel.tsx
 		/**
 		* Scheduler panel: task list / create-edit form / execution history, rendered
 		* inside a modal. Styled with the host's --dsw-alias design tokens so it reads
@@ -753,7 +747,7 @@ window.__ModuleLoader__.load({
 			"once",
 			"interval"
 		];
-		function SchedulerPanel({ onClose, t, sessions, workspaces }) {
+		function SchedulerPanel({ onClose, t, sessions, workspaces, uiWorkspace, resolveUiWorkspace, describeContext }) {
 			const [view, setView] = (0, react.useState)("list");
 			const [tasks, setTasks] = (0, react.useState)([]);
 			const [history, setHistory] = (0, react.useState)([]);
@@ -807,35 +801,34 @@ window.__ModuleLoader__.load({
 				bodyRef.current?.scrollTo({ top: 0 });
 			};
 			/**
-			* Open a session through the host sessions service, then close the panel so
-			* the session is visible. Sessions live in a workspace (their cwd); when the
-			* target session belongs to another workspace the host UI cannot render it
-			* here, so we surface a clear message instead of silently landing on the
-			* empty state.
+			* Open a session through the host's workspace navigation service.
+			*
+			* DSH 0.2 moved session selection out of the `sessions` contract into
+			* `uiWorkspace.openSession(target)`; the 0.1.x selection method no longer
+			* exists, and calling it inside a try/catch surfaced a misleading
+			* "session not found" instead of navigating.
+			*
+			* Sessions live in a workspace (their cwd); when the target session belongs
+			* to an unregistered workspace the host UI cannot render it here, so we
+			* surface a clear message instead of silently landing on the empty state.
 			*/
 			const openSession = (sessionId) => {
-				if (sessions === void 0) {
-					setError("宿主未提供会话服务 / sessions service unavailable");
+				const nav = resolveUiWorkspace?.() ?? uiWorkspace;
+				if (nav === void 0) {
+					const visible = describeContext?.() ?? "";
+					setError(`宿主未提供会话导航服务 / session navigation service unavailable${visible ? `（可见服务：${visible}）` : ""}`);
 					return;
 				}
-				const snapshot = sessions.list?.getSnapshot();
-				const cwd = snapshot?.byId[sessionId]?.cwd;
+				const cwd = sessions?.list?.getSnapshot()?.byId[sessionId]?.cwd;
 				const wsItems = workspaces?.list?.getSnapshot().items ?? [];
 				if (cwd !== void 0) {
-					const targetWs = wsItems.find((w) => w.path === cwd);
-					if (targetWs === void 0) {
+					if (wsItems.find((w) => w.path === cwd) === void 0) {
 						setError(fmt(t("session.openUnregistered"), { path: cwd }));
-						return;
-					}
-					const currentId = snapshot?.current;
-					const currentWs = currentId === void 0 ? void 0 : wsItems.find((w) => w.path === snapshot?.byId[currentId]?.cwd);
-					if (currentWs !== void 0 && currentWs.workspaceId !== targetWs.workspaceId) {
-						setError(fmt(t("session.openCrossWorkspace"), { path: targetWs.path }));
 						return;
 					}
 				}
 				try {
-					sessions.open(sessionId);
+					nav.openSession(sessionId);
 					onClose();
 				} catch {
 					setError("会话不存在或已被清理 / session not found");
@@ -2031,13 +2024,12 @@ window.__ModuleLoader__.load({
 			if (task.type === "interval") return `${t("type.interval")} · ${task.everyMinutes} min`;
 			return task.cron;
 		}
-		//#endregion
-		//#region src/client/SchedulerEntry.tsx
+		// src/client/SchedulerEntry.tsx
 		/**
 		* Sidebar footer entry: a native-looking "调度器" row (icon + label) mounted in
 		* the left sidebar's footer.action slot. Clicking opens the scheduler panel.
 		*/
-		function SchedulerEntry({ t, sessions, workspaces }) {
+		function SchedulerEntry({ t, sessions, workspaces, uiWorkspace, resolveUiWorkspace, describeContext }) {
 			const [open, setOpen] = (0, react.useState)(false);
 			return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("button", {
 				type: "button",
@@ -2089,11 +2081,13 @@ window.__ModuleLoader__.load({
 				onClose: () => setOpen(false),
 				t,
 				sessions,
-				workspaces
+				workspaces,
+				uiWorkspace,
+				resolveUiWorkspace,
+				describeContext
 			})] });
 		}
-		//#endregion
-		//#region src/client/index.ts
+		// src/client/index.ts
 		/**
 		* dsh-scheduler client: registers a "调度器" entry in the left sidebar's
 		* footer.action slot (same pattern as dsh-knj-workflow's "新建任务" entry).
@@ -2105,7 +2099,8 @@ window.__ModuleLoader__.load({
 			"locale",
 			"slots",
 			"sessions",
-			"workspaces"
+			"workspaces",
+			"uiWorkspace"
 		];
 		function apply(ctx) {
 			ctx.effect(() => ctx.locale.register(NS, {
@@ -2115,6 +2110,25 @@ window.__ModuleLoader__.load({
 			const t = ctx.locale.bind(NS);
 			const sessions = ctx.sessions;
 			const workspaces = ctx.workspaces;
+			/**
+			* Read navigation at click time, not at apply time: the sidebar entry is
+			* registered once and captures this closure, so a service provided later in
+			* boot would otherwise stay frozen as `undefined`.
+			*/
+			const resolveUiWorkspace = () => {
+				if (ctx.uiWorkspace !== void 0) return ctx.uiWorkspace;
+				return typeof ctx.get === "function" ? ctx.get("uiWorkspace") : void 0;
+			};
+			/** Visible service names, for diagnosing a host that does not expose navigation. */
+			const describeContext = () => {
+				const names = [];
+				for (const key of Object.keys(ctx)) {
+					if (key.startsWith("_")) continue;
+					const value = ctx[key];
+					if (value !== null && (typeof value === "object" || typeof value === "function")) names.push(key);
+				}
+				return names.slice(0, 24).join(",");
+			};
 			ctx.effect(() => {
 				if (!ctx.slots) return;
 				ctx.slots.inject("knj.menu.item", () => ctx.slots.register({
@@ -2125,11 +2139,13 @@ window.__ModuleLoader__.load({
 				}, () => (0, react.createElement)(SchedulerEntry, {
 					t,
 					sessions,
-					workspaces
+					workspaces,
+					uiWorkspace: ctx.uiWorkspace,
+					resolveUiWorkspace,
+					describeContext
 				})));
 			}, "dsh-scheduler: sidebar entry");
 		}
-		//#endregion
 		exports.apply = apply;
 		exports.inject = inject;
 		exports.name = name;

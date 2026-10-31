@@ -1,0 +1,41 @@
+{
+  "scanned_at": "2026-10-24T13:42:54.082Z",
+  "project_root": "D:/dsh-knj/dsh-knj-scheduler",
+  "files_scanned": 14,
+  "count": 5,
+  "by_type": {
+    "route": 5
+  },
+  "entries": [
+    {
+      "type": "route",
+      "name": "history",
+      "file": "src/routes.ts",
+      "line": 106
+    },
+    {
+      "type": "route",
+      "name": "attachments",
+      "file": "src/routes.ts",
+      "line": 113
+    },
+    {
+      "type": "route",
+      "name": "workflows",
+      "file": "src/routes.ts",
+      "line": 122
+    },
+    {
+      "type": "route",
+      "name": "tasks",
+      "file": "src/routes.ts",
+      "line": 132
+    },
+    {
+      "type": "route",
+      "name": "preview",
+      "file": "src/routes.ts",
+      "line": 81
+    }
+  ]
+}

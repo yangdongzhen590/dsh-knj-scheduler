@@ -1,0 +1,7 @@
+[
+  { "path": "src/executor.ts", "symbols": ["executeTask", "defaultAgentPreset", "createMessage", "attachToWorkspace"] },
+  { "path": "src/routes.ts", "symbols": ["onFire", "executeTask", "updateHistory", "runMatch"] },
+  { "path": "src/types.ts", "symbols": ["ExecutionKind", "TaskDef"] },
+  { "path": "test/scheduled-session.test.mjs", "symbols": ["agentPreset", "agentPresets"] },
+  { "path": "test/executor-model-selection.test.mjs", "symbols": ["installModelSelection", "agentPreset"] }
+]

@@ -1,0 +1,79 @@
+# tasks.yml — 系统功能挖掘任务清单
+# 状态机：待挖掘 -> 挖掘中 -> 挖掘完成 | 挖掘失败
+
+meta:
+  version: "1.0"
+  project_root: "D:/dsh-knj/dsh-knj-scheduler"
+  generated_at: "2026-10-24 21:45:20"
+  updated_at: "2026-10-24 21:51:50"
+  total_tasks: 6
+  completed: 6
+  failed: 0
+  in_progress: 0
+
+tasks:
+  - index: 1
+    function_name: "任务定义与持久化"
+    status: 挖掘完成
+    attempt_count: 1
+    start_time: "2026-10-24 21:49:09"
+    end_time: "2026-10-24 21:49:10"
+    page_id: "capability-任务定义与持久化"
+    entry_count: 2
+    entries: ["route:tasks", "manual:route:/tasks/:id"]
+    modules: ["src/routes.ts", "src/store.ts", "src/types.ts"]
+
+  - index: 2
+    function_name: "触发计划与下次执行"
+    status: 挖掘完成
+    attempt_count: 1
+    start_time: "2026-10-24 21:49:37"
+    end_time: "2026-10-24 21:50:05"
+    page_id: "capability-触发计划与下次执行"
+    entry_count: 1
+    entries: ["route:preview"]
+    modules: ["src/scheduler.ts", "src/routes.ts", "src/types.ts"]
+
+  - index: 3
+    function_name: "到点执行与提示词会话"
+    status: 挖掘完成
+    attempt_count: 1
+    start_time: "2026-10-24 21:50:05"
+    end_time: "2026-10-24 21:50:33"
+    page_id: "capability-到点执行与提示词会话"
+    entry_count: 1
+    entries: ["manual:route:/tasks/:id/run"]
+    modules: ["src/executor.ts", "src/scheduler.ts", "src/routes.ts"]
+
+  - index: 4
+    function_name: "执行历史与状态流转"
+    status: 挖掘完成
+    attempt_count: 1
+    start_time: "2026-10-24 21:50:33"
+    end_time: "2026-10-24 21:51:01"
+    page_id: "capability-执行历史与状态流转"
+    entry_count: 2
+    entries: ["route:history", "manual:route:/tasks/:id/history"]
+    modules: ["src/store.ts", "src/routes.ts", "src/types.ts"]
+
+  - index: 5
+    function_name: "附件与工作流联动"
+    status: 挖掘完成
+    attempt_count: 1
+    start_time: "2026-10-24 21:51:01"
+    end_time: "2026-10-24 21:51:33"
+    page_id: "capability-附件与工作流联动"
+    entry_count: 2
+    entries: ["route:attachments", "route:workflows"]
+    modules: ["src/attachments.ts", "src/executor.ts", "src/types.ts", "src/routes.ts"]
+
+  - index: 6
+    function_name: "边栏面板与表单"
+    status: 挖掘完成
+    attempt_count: 1
+    start_time: "2026-10-24 21:51:33"
+    end_time: "2026-10-24 21:51:50"
+    page_id: "capability-边栏面板与表单"
+    entry_count: 1
+    entries: ["manual:slot:knj.menu.item"]
+    modules: ["src/client/index.ts", "src/client/SchedulerEntry.tsx", "src/client/SchedulerPanel.tsx", "src/client/api.ts", "src/client/locales.ts", "src/client/pager.ts"]

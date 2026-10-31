@@ -12,7 +12,7 @@ import * as api from './api.ts'
 import type { ExecutionKind, HistoryEntry, TaskInput, TaskType, TaskView, WorkflowAttachmentRef, WorkflowChoice } from './api.ts'
 import { IconCheck, IconChevronLeft, IconClock, IconCross, IconEdit, IconHistory, IconPlay, IconPlus, IconRefresh, IconTrash } from './icons.tsx'
 import { PAGE_SIZES, pageSlice, fmt } from './pager.ts'
-import type { SessionsService, WorkspacesService } from './index.ts'
+import type { SessionsService, UiWorkspaceService, WorkspacesService } from './index.ts'
 
 type View = 'list' | 'form' | 'history' | 'executions'
 
@@ -21,6 +21,11 @@ export interface SchedulerPanelProps {
   t: (key: keyof Dict) => string
   sessions?: SessionsService
   workspaces?: WorkspacesService
+  uiWorkspace?: UiWorkspaceService
+  /** Late-bound navigation lookup: the service may register after this entry mounts. */
+  resolveUiWorkspace?: () => UiWorkspaceService | undefined
+  /** Visible service names, shown only when navigation is genuinely unavailable. */
+  describeContext?: () => string
 }
 
 const CRON_RE = /^[0-9*,/\-?L#w]+ [0-9*,/\-?L#w]+ [0-9*,/\-?L#w]+ [0-9*,/\-?L#w]+ [0-9*,/\-?L#w]+(\s+[0-9*,/\-?L#w]+)?$/
@@ -136,7 +141,7 @@ function Pill({ ok, children }: { ok: boolean; children: ReactNode }) {
 
 const TRIGGER_TYPES: TaskType[] = ['cron', 'once', 'interval']
 
-export function SchedulerPanel({ onClose, t, sessions, workspaces }: SchedulerPanelProps) {
+export function SchedulerPanel({ onClose, t, sessions, workspaces, uiWorkspace, resolveUiWorkspace, describeContext }: SchedulerPanelProps) {
   const [view, setView] = useState<View>('list')
   const [tasks, setTasks] = useState<TaskView[]>([])
   const [history, setHistory] = useState<HistoryEntry[]>([])
@@ -193,19 +198,26 @@ export function SchedulerPanel({ onClose, t, sessions, workspaces }: SchedulerPa
   const scrollTop = (): void => { bodyRef.current?.scrollTo({ top: 0 }) }
 
   /**
-   * Open a session through the host sessions service, then close the panel so
-   * the session is visible. Sessions live in a workspace (their cwd); when the
-   * target session belongs to another workspace the host UI cannot render it
-   * here, so we surface a clear message instead of silently landing on the
-   * empty state.
+   * Open a session through the host's workspace navigation service.
+   *
+   * DSH 0.2 moved session selection out of the `sessions` contract into
+   * `uiWorkspace.openSession(target)`; the 0.1.x selection method no longer
+   * exists, and calling it inside a try/catch surfaced a misleading
+   * "session not found" instead of navigating.
+   *
+   * Sessions live in a workspace (their cwd); when the target session belongs
+   * to an unregistered workspace the host UI cannot render it here, so we
+   * surface a clear message instead of silently landing on the empty state.
    */
   const openSession = (sessionId: string): void => {
-    if (sessions === undefined) {
-      setError('宿主未提供会话服务 / sessions service unavailable')
+    // Read the service at click time: it may register after this entry mounts.
+    const nav = resolveUiWorkspace?.() ?? uiWorkspace
+    if (nav === undefined) {
+      const visible = describeContext?.() ?? ''
+      setError(`宿主未提供会话导航服务 / session navigation service unavailable${visible ? `（可见服务：${visible}）` : ''}`)
       return
     }
-    const snapshot = sessions.list?.getSnapshot()
-    const cwd = snapshot?.byId[sessionId]?.cwd
+    const cwd = sessions?.list?.getSnapshot()?.byId[sessionId]?.cwd
     const wsItems = workspaces?.list?.getSnapshot().items ?? []
     if (cwd !== undefined) {
       const targetWs = wsItems.find((w) => w.path === cwd)
@@ -213,15 +225,9 @@ export function SchedulerPanel({ onClose, t, sessions, workspaces }: SchedulerPa
         setError(fmt(t('session.openUnregistered'), { path: cwd }))
         return
       }
-      const currentId = snapshot?.current
-      const currentWs = currentId === undefined ? undefined : wsItems.find((w) => w.path === snapshot?.byId[currentId]?.cwd)
-      if (currentWs !== undefined && currentWs.workspaceId !== targetWs.workspaceId) {
-        setError(fmt(t('session.openCrossWorkspace'), { path: targetWs.path }))
-        return
-      }
     }
     try {
-      sessions.open(sessionId)
+      nav.openSession(sessionId)
       onClose()
     } catch {
       setError('会话不存在或已被清理 / session not found')

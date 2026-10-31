@@ -1,0 +1,7 @@
+[
+  { "path": "src/scheduler.ts", "symbols": ["buildCronPattern", "TaskScheduler", "nextRun"] },
+  { "path": "src/routes.ts", "symbols": ["mountSchedulerRoutes", "buildCronPattern", "nextRuns", "withNextRun"] },
+  { "path": "src/types.ts", "symbols": ["effectiveType", "validateTask"] },
+  { "path": "src/client/SchedulerPanel.tsx", "symbols": ["previewSchedule", "CRON_RE", "triggerText"] },
+  { "path": "src/index.ts", "symbols": ["Config", "TaskScheduler"] }
+]

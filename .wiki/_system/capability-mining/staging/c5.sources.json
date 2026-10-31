@@ -1,0 +1,8 @@
+[
+  { "path": "src/attachments.ts", "symbols": ["WorkflowAttachmentRef", "AttachmentStore", "sanitizeAttachmentName", "normalizeWorkflowAttachments", "MAX_ATTACHMENT_BYTES"] },
+  { "path": "src/executor.ts", "symbols": ["executeTask", "stageAttachments", "createAndStartScheduledTask"] },
+  { "path": "src/routes.ts", "symbols": ["attachments", "workflows", "ATTACHMENT_BODY_BYTES"] },
+  { "path": "src/types.ts", "symbols": ["workflowPathInputs", "workflowAttachments", "describeWorkflowPathInputsError"] },
+  { "path": "src/index.ts", "symbols": ["AttachmentStore", "onAttachmentDrop"] },
+  { "path": "src/client/SchedulerPanel.tsx", "symbols": ["fileToBase64", "uploadAttachments", "workflowPathInputs"] }
+]

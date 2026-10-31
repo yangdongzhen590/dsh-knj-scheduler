@@ -1,0 +1,7 @@
+[
+  { "path": "src/types.ts", "symbols": ["TaskDef", "TaskInput", "validateTask", "validateTaskInput"] },
+  { "path": "src/store.ts", "symbols": ["TaskStore", "create", "update", "remove", "persist"] },
+  { "path": "src/routes.ts", "symbols": ["mountSchedulerRoutes", "validateTask", "readJsonBody"] },
+  { "path": "src/scheduler.ts", "symbols": ["TaskScheduler", "nextRun"] },
+  { "path": "src/client/api.ts", "symbols": ["createTask", "updateTask", "deleteTask"] }
+]

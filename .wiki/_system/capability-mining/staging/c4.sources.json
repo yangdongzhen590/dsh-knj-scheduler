@@ -1,0 +1,7 @@
+[
+  { "path": "src/store.ts", "symbols": ["HistoryEntry", "appendHistory", "updateHistory", "history", "historyAll", "trimHistory"] },
+  { "path": "src/routes.ts", "symbols": ["historyAll", "historyMatch", "appendHistory", "updateHistory"] },
+  { "path": "src/client/SchedulerPanel.tsx", "symbols": ["HistoryRow", "pageSlice", "reloadExecutions"] },
+  { "path": "src/client/pager.ts", "symbols": ["pageSlice", "PAGE_SIZES"] },
+  { "path": "src/client/locales.ts", "symbols": ["history.retention", "history.all.retention"] }
+]

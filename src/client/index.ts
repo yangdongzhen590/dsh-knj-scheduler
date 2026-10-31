@@ -21,12 +21,30 @@ interface SlotsService {
   register(meta: { name: string; id: string; locale: string; order?: number }, render: (props: unknown) => unknown): unknown
 }
 
-/** The subset of the host `sessions` client service this plugin touches (see dsh-client-runtime). */
+/**
+ * The subset of the host `sessions` client service this plugin touches (see
+ * @deepseek-ai/dsh-api-session-controller).
+ *
+ * Session selection is NOT part of this service: DSH 0.2 removed it from
+ * `ISessions` and moved it to the `uiWorkspace` navigation service below.
+ */
 export interface SessionsService {
-  /** Select a listed session as current (the same path the session tree click uses). */
-  open(id: string): void
   /** Live session summaries (read-only mirror; `cwd` is the session's project directory). */
-  list?: { getSnapshot(): { byId: Record<string, { cwd?: string }>; current?: string } }
+  list?: {
+    getSnapshot(): {
+      byId: Record<string, { cwd?: string }>
+    }
+  }
+}
+
+/**
+ * The subset of the host `uiWorkspace` navigation service this plugin touches.
+ * This is where DSH 0.2 put session selection (previously a method on the
+ * sessions service in 0.1.x), for both sessions and subagents.
+ */
+export interface UiWorkspaceService {
+  /** Navigate to an existing session (the same path the session tree click uses). */
+  openSession(id: string): void
 }
 
 /** The subset of the host `workspaces` client service this plugin touches (see dsh-client-runtime). */
@@ -42,10 +60,13 @@ interface SchedulerClientContext {
   slots: SlotsService
   sessions?: SessionsService
   workspaces?: WorkspacesService
+  uiWorkspace?: UiWorkspaceService
+  /** Cordis service lookup; the reliable way to read a service registered after apply. */
+  get?: (name: string) => unknown
 }
 
 export const name = 'dsh-scheduler'
-export const inject = ['locale', 'slots', 'sessions', 'workspaces']
+export const inject = ['locale', 'slots', 'sessions', 'workspaces', 'uiWorkspace']
 
 export function apply(ctx: SchedulerClientContext): void {
   ctx.effect(() => ctx.locale.register(NS, { zh, en }), 'dsh-scheduler: dictionaries')
@@ -53,11 +74,33 @@ export function apply(ctx: SchedulerClientContext): void {
   const sessions = ctx.sessions
   const workspaces = ctx.workspaces
 
+  /**
+   * Read navigation at click time, not at apply time: the sidebar entry is
+   * registered once and captures this closure, so a service provided later in
+   * boot would otherwise stay frozen as `undefined`.
+   */
+  const resolveUiWorkspace = (): UiWorkspaceService | undefined => {
+    if (ctx.uiWorkspace !== undefined) return ctx.uiWorkspace
+    const viaLookup = typeof ctx.get === 'function' ? ctx.get('uiWorkspace') : undefined
+    return viaLookup as UiWorkspaceService | undefined
+  }
+
+  /** Visible service names, for diagnosing a host that does not expose navigation. */
+  const describeContext = (): string => {
+    const names: string[] = []
+    for (const key of Object.keys(ctx as unknown as Record<string, unknown>)) {
+      if (key.startsWith('_')) continue
+      const value = (ctx as unknown as Record<string, unknown>)[key]
+      if (value !== null && (typeof value === 'object' || typeof value === 'function')) names.push(key)
+    }
+    return names.slice(0, 24).join(',')
+  }
+
   ctx.effect(() => {
     if (!ctx.slots) return
     ctx.slots.inject('knj.menu.item', () => ctx.slots.register(
       { name: 'knj.menu.item', id: 'dsh-scheduler', order: 20, locale: 'zh' },
-      () => h(SchedulerEntry, { t, sessions, workspaces }),
+      () => h(SchedulerEntry, { t, sessions, workspaces, uiWorkspace: ctx.uiWorkspace, resolveUiWorkspace, describeContext }),
     ))
   }, 'dsh-scheduler: sidebar entry')
 }

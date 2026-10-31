@@ -1,0 +1,68 @@
+{
+  "version": 1,
+  "sources": {
+    "capability-mining:support-croner-protect": {
+      "content_hash": "62f0911bffb9ffbcc55fc08d518fff8269f6837d03eec05c2b4bb274e294d446",
+      "last_ingested": "2026-10-24T13:54:50.814Z",
+      "pages_produced": [
+        "croner-protect-与非重入触发"
+      ]
+    },
+    "capability-mining:support-tasks-json": {
+      "content_hash": "66b0dd7f9d80326696b072ed2a48fb868e67906399b1392f6fc13d85a4355a36",
+      "last_ingested": "2026-10-24T13:55:04.113Z",
+      "pages_produced": [
+        "tasks-json-原子写入与加载白名单"
+      ]
+    },
+    "capability-mining:support-session-create": {
+      "content_hash": "5eb25e6f965c9ce331a1258896f77cd054e212aaee2bef108529edfa19c1afca",
+      "last_ingested": "2026-10-24T13:55:11.078Z",
+      "pages_produced": [
+        "dsh-会话创建-agentpreset-与模型选择"
+      ]
+    },
+    "capability-mining:任务定义与持久化": {
+      "content_hash": "36d77d287d2dad25a1bc29879a886603af147626824666cd7486cc428c815a29",
+      "last_ingested": "2026-10-24T13:55:27.652Z",
+      "pages_produced": [
+        "capability-任务定义与持久化"
+      ]
+    },
+    "capability-mining:触发计划与下次执行": {
+      "content_hash": "e6fe8c6975d15eda6f295b2171ec1744ce25d7a5e7c887227d8a144ea3495b99",
+      "last_ingested": "2026-10-24T13:58:03.968Z",
+      "pages_produced": [
+        "capability-触发计划与下次执行"
+      ]
+    },
+    "capability-mining:到点执行与提示词会话": {
+      "content_hash": "5e502d3a39a9adf43b70b500e5ef4c7118b9f5bf8fb28f89a2fcde46ac31fb70",
+      "last_ingested": "2026-10-24T13:55:59.941Z",
+      "pages_produced": [
+        "capability-到点执行与提示词会话"
+      ]
+    },
+    "capability-mining:执行历史与状态流转": {
+      "content_hash": "863d915cf122a4c15df7325af807050ca686edf5050f33045defd43b480b39d6",
+      "last_ingested": "2026-10-24T13:56:15.206Z",
+      "pages_produced": [
+        "capability-执行历史与状态流转"
+      ]
+    },
+    "capability-mining:附件与工作流联动": {
+      "content_hash": "5d9a15148e1919f5e6f8b4b9109d2e6a36d7aae89b8fe4c0c39b391879437cff",
+      "last_ingested": "2026-10-24T13:56:41.512Z",
+      "pages_produced": [
+        "capability-附件与工作流联动"
+      ]
+    },
+    "capability-mining:边栏面板与表单": {
+      "content_hash": "0b6c1dc4b37b78d39e6aa9975dfcb8b4317b889c683926b6684f3bdbb2a0eb20",
+      "last_ingested": "2026-10-24T13:57:04.356Z",
+      "pages_produced": [
+        "capability-边栏面板与表单"
+      ]
+    }
+  }
+}
