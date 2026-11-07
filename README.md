@@ -3,7 +3,7 @@
 定时任务调度器插件：按 Cron 自动启动**提示词会话**或（可选）**KNJ 工作流任务**。
 Scheduled tasks for DeepSeek Harness — start a prompt session or, optionally, a KNJ workflow task on a cron schedule.
 
-- 入口：左侧栏底部「更多 → 调度器」（菜单入口由 dsh-knj-menu 提供，已声明为 npm 依赖，安装命令见下）
+- 入口：设置 →「定时任务」（设置页左侧导航新增一行，点开即是任务面板；不再依赖侧栏菜单插件）
 - 面板：**任务列表 / 执行记录**双页签，各自带刷新按钮
 - 任务列表与执行记录均**分页显示**（每页 10/25/50/100 条），分页条固定在面板底部
 - 触发方式：Cron 表达式 / 指定时间（一次性，触发后自动停用）/ 间隔分钟数；表单实时预览下次执行时间
@@ -17,15 +17,15 @@ Scheduled tasks for DeepSeek Harness — start a prompt session or, optionally, 
 ## 安装
 
 ```sh
-dsh plugin --profile web add dsh-scheduler dsh-knj-menu
+dsh plugin --profile web add dsh-scheduler
 ```
 
 > npm 包 [`dsh-scheduler`](https://www.npmjs.com/package/dsh-scheduler)，源码仓库 [dsh-knj-scheduler](https://github.com/yangdongzhen590/dsh-knj-scheduler)。
-> 侧边栏入口由 [dsh-knj-menu](https://github.com/yangdongzhen590/dsh-knj-menu) 提供，上面一条命令同时安装两者（已作为 npm 依赖声明，版本自动配套）。
+> 入口由宿主设置页的 `settings.section` 槽位提供，无需额外安装菜单插件。
 
 ## 使用
 
-1. 左侧栏「更多 → 调度器」打开面板
+1. 设置 →「定时任务」打开面板（设置弹窗里内联显示，Esc 或右上角关闭设置）
 2. 「新建任务」：选择「提示词会话」并填写提示词；或选择「KNJ 工作流」、工作流、流程任务标题、必填工作目录、可选的用户故事编码，以及所选工作流声明的**文件入参路径**（有声明时才出现；相对路径按工作目录解析，触发时读取）
 3. 保存后按计划调度；提示词模式创建会话，工作流模式通过已安装的 `dsh-knj-workflow` 启动流程任务
 4. 工作流每次触发均解析最新已保存的定义；调度器不会等待或镜像流程最终状态

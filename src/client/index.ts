@@ -1,13 +1,15 @@
 /**
- * dsh-scheduler client: registers a "调度器" entry in the left sidebar's
- * footer.action slot (same pattern as dsh-knj-workflow's "新建任务" entry).
- * Built by tsdown into the __ModuleLoader__ factory bundle at client/client.js.
+ * dsh-scheduler client: registers the scheduler as a Settings → 定时任务
+ * section (`settings.section`), so it opens from the host's Settings dialog
+ * and no longer needs the dsh-knj-menu sidebar. Built by tsdown into the
+ * __ModuleLoader__ factory bundle at client/client.js.
  */
 import { createElement as h } from 'react'
 import { en, zh } from './locales.ts'
-import { SchedulerEntry } from './SchedulerEntry.tsx'
+import { SchedulerSection } from './SchedulerSection.tsx'
 
 const NS = 'dsh-scheduler'
+const SECTION_ID = 'dsh-scheduler'
 
 /** The subset of the locale service this plugin touches. */
 interface LocaleService {
@@ -18,7 +20,10 @@ interface LocaleService {
 /** The subset of the client slots service this plugin touches. */
 interface SlotsService {
   inject(slot: string, register: () => unknown): void
-  register(meta: { name: string; id: string; locale: string; order?: number }, render: (props: unknown) => unknown): unknown
+  register(
+    meta: { name: string; id: string; locale?: string; order?: number; label?: string | (() => string) },
+    render: (props: unknown) => unknown,
+  ): unknown
 }
 
 /**
@@ -75,7 +80,7 @@ export function apply(ctx: SchedulerClientContext): void {
   const workspaces = ctx.workspaces
 
   /**
-   * Read navigation at click time, not at apply time: the sidebar entry is
+   * Read navigation at click time, not at apply time: the Settings section is
    * registered once and captures this closure, so a service provided later in
    * boot would otherwise stay frozen as `undefined`.
    */
@@ -98,9 +103,27 @@ export function apply(ctx: SchedulerClientContext): void {
 
   ctx.effect(() => {
     if (!ctx.slots) return
-    ctx.slots.inject('knj.menu.item', () => ctx.slots.register(
-      { name: 'knj.menu.item', id: 'dsh-scheduler', order: 20, locale: 'zh' },
-      () => h(SchedulerEntry, { t, sessions, workspaces, uiWorkspace: ctx.uiWorkspace, resolveUiWorkspace, describeContext }),
+    ctx.slots.inject('settings.section', () => ctx.slots.register(
+      {
+        name: 'settings.section',
+        id: SECTION_ID,
+        order: 30,
+        // The host resolves this thunk when it renders the navigation rows.
+        label: () => t('panel.title'),
+        locale: NS,
+      },
+      (props: unknown) => {
+        const close = (props as { close?: () => void } | undefined)?.close
+        return h(SchedulerSection, {
+          close,
+          t,
+          sessions,
+          workspaces,
+          uiWorkspace: ctx.uiWorkspace,
+          resolveUiWorkspace,
+          describeContext,
+        })
+      },
     ))
-  }, 'dsh-scheduler: sidebar entry')
+  }, 'dsh-scheduler: settings section')
 }

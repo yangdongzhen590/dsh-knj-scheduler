@@ -1,7 +1,8 @@
 /**
- * Scheduler panel: task list / create-edit form / execution history, rendered
- * inside a modal. Styled with the host's --dsw-alias design tokens so it reads
- * as a native DSH surface (no hardcoded palette, no emoji icons).
+ * Scheduler panel: task list / create-edit form / execution history. Rendered
+ * inline as the Settings → 定时任务 section (`embedded`), or as a standalone
+ * modal when `embedded` is false. Styled with the host's --dsw-alias design
+ * tokens so it reads as a native DSH surface (no hardcoded palette, no emoji).
  *
  * Trigger types: cron (expression), once (specific time), interval (every N min).
  * The form previews the next run time live via /dsh-scheduler/preview.
@@ -17,7 +18,10 @@ import type { SessionsService, UiWorkspaceService, WorkspacesService } from './i
 type View = 'list' | 'form' | 'history' | 'executions'
 
 export interface SchedulerPanelProps {
-  onClose: () => void
+  /** Close/leave the panel. Optional: an embedded panel only closes the Settings dialog. */
+  onClose?: () => void
+  /** Render inline (Settings section) instead of as a full-window modal. */
+  embedded?: boolean
   t: (key: keyof Dict) => string
   sessions?: SessionsService
   workspaces?: WorkspacesService
@@ -57,6 +61,20 @@ const S: Record<string, React.CSSProperties> = {
     background: T.surface, border: `1px solid ${T.border}`, borderRadius: 14,
     boxShadow: '0 24px 80px rgba(0,0,0,.45)', overflow: 'hidden',
   },
+  /** Embedded: fill the Settings content area, no modal chrome. */
+  embedRoot: {
+    display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0, width: '100%',
+    fontFamily: T.font, color: T.text, fontSize: 14, lineHeight: 1.5, boxSizing: 'border-box',
+  },
+  embedPanel: { display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, overflow: 'hidden' },
+  /** Embedded: the Settings content area already supplies the horizontal gutter. */
+  embedHead: { display: 'flex', alignItems: 'center', gap: 12, padding: '0 0 14px', borderBottom: `1px solid ${T.border}` },
+  embedTabBar: {
+    display: 'flex', gap: 4, alignItems: 'center', flexShrink: 0,
+    borderBottom: `1px solid ${T.border}`, padding: 0,
+  },
+  embedBody: { flex: 1, overflow: 'auto', padding: '14px 0 0' },
+  embedPagerBar: { flexShrink: 0, borderTop: `1px solid ${T.border}`, padding: '12px 0 0' },
   tabBar: {
     display: 'flex', gap: 4, alignItems: 'center', flexShrink: 0,
     borderBottom: `1px solid ${T.border}`, padding: '0 16px',
@@ -141,7 +159,7 @@ function Pill({ ok, children }: { ok: boolean; children: ReactNode }) {
 
 const TRIGGER_TYPES: TaskType[] = ['cron', 'once', 'interval']
 
-export function SchedulerPanel({ onClose, t, sessions, workspaces, uiWorkspace, resolveUiWorkspace, describeContext }: SchedulerPanelProps) {
+export function SchedulerPanel({ onClose, embedded = false, t, sessions, workspaces, uiWorkspace, resolveUiWorkspace, describeContext }: SchedulerPanelProps) {
   const [view, setView] = useState<View>('list')
   const [tasks, setTasks] = useState<TaskView[]>([])
   const [history, setHistory] = useState<HistoryEntry[]>([])
@@ -228,7 +246,7 @@ export function SchedulerPanel({ onClose, t, sessions, workspaces, uiWorkspace, 
     }
     try {
       nav.openSession(sessionId)
-      onClose()
+      onClose?.()
     } catch {
       setError('会话不存在或已被清理 / session not found')
     }
@@ -246,8 +264,11 @@ export function SchedulerPanel({ onClose, t, sessions, workspaces, uiWorkspace, 
 
   useEffect(() => {
     void reload()
+    // Embedded in the Settings dialog, which owns Escape itself: closing the
+    // Settings dialog there must stay one layer, not two.
+    if (embedded === true) return
     const onKey = (e: KeyboardEvent): void => {
-      if (e.key === 'Escape') onClose()
+      if (e.key === 'Escape') onClose?.()
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
@@ -460,22 +481,27 @@ function formatBytes(size: number): string {
   const histResult = view === 'history' ? pageSlice(history, histPage, histPageSize) : null
 
   return (
-    <div style={S.overlay} onClick={(e) => { if (e.target === e.currentTarget) onClose() }}>
-      <div style={S.panel}>
-        <div style={S.head}>
+    <div
+      style={embedded ? S.embedRoot : S.overlay}
+      onClick={embedded ? undefined : (e) => { if (e.target === e.currentTarget) onClose?.() }}
+    >
+      <div style={embedded ? S.embedPanel : S.panel}>
+        <div style={embedded ? S.embedHead : S.head}>
           <span style={{ ...S.title, color: T.accent }}><IconClock size={17} /></span>
           <span style={S.title}>{t('panel.title')}</span>
           <span style={S.sub}>{t('panel.subtitle')}</span>
           <span style={S.spacer} />
-          <button style={S.iconBtn} title={t('btn.close')} onClick={onClose}><IconCross /></button>
+          {!embedded && (
+            <button style={S.iconBtn} title={t('btn.close')} onClick={onClose}><IconCross /></button>
+          )}
         </div>
         {(view === 'list' || view === 'executions') && (
-          <div style={S.tabBar}>
+          <div style={embedded ? S.embedTabBar : S.tabBar}>
             <button style={{ ...S.tab, ...(view === 'list' ? S.tabOn : {}) }} onClick={() => setView('list')}>{t('tab.tasks')}</button>
             <button style={{ ...S.tab, ...(view === 'executions' ? S.tabOn : {}) }} onClick={() => void openExecutions()}>{t('tab.executions')}</button>
           </div>
         )}
-        <div style={S.body} ref={bodyRef}>
+        <div style={embedded ? S.embedBody : S.body} ref={bodyRef}>
           {error !== null && <div style={S.err}><IconCross size={15} />{error}</div>}
           {runNotice !== null && (
             <div style={{ ...S.err, background: 'color-mix(in srgb, var(--dsw-static-green-500) 12%, transparent)', borderColor: T.success, color: T.success }}>
@@ -752,7 +778,7 @@ function formatBytes(size: number): string {
         </div>
 
         {(view === 'executions' && execResult !== null && allHistory.length > 0) && (
-          <div style={S.pagerBar}>
+          <div style={embedded ? S.embedPagerBar : S.pagerBar}>
             <Pager
               page={execResult.pageSafe}
               pages={execResult.pages}
@@ -765,7 +791,7 @@ function formatBytes(size: number): string {
           </div>
         )}
         {(view === 'history' && histResult !== null && history.length > 0) && (
-          <div style={S.pagerBar}>
+          <div style={embedded ? S.embedPagerBar : S.pagerBar}>
             <Pager
               page={histResult.pageSafe}
               pages={histResult.pages}

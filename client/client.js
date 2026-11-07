@@ -395,9 +395,10 @@ window.__ModuleLoader__.load({
 		}
 		// src/client/SchedulerPanel.tsx
 		/**
-		* Scheduler panel: task list / create-edit form / execution history, rendered
-		* inside a modal. Styled with the host's --dsw-alias design tokens so it reads
-		* as a native DSH surface (no hardcoded palette, no emoji icons).
+		* Scheduler panel: task list / create-edit form / execution history. Rendered
+		* inline as the Settings → 定时任务 section (`embedded`), or as a standalone
+		* modal when `embedded` is false. Styled with the host's --dsw-alias design
+		* tokens so it reads as a native DSH surface (no hardcoded palette, no emoji).
 		*
 		* Trigger types: cron (expression), once (specific time), interval (every N min).
 		* The form previews the next run time live via /dsh-scheduler/preview.
@@ -442,6 +443,52 @@ window.__ModuleLoader__.load({
 				borderRadius: 14,
 				boxShadow: "0 24px 80px rgba(0,0,0,.45)",
 				overflow: "hidden"
+			},
+			/** Embedded: fill the Settings content area, no modal chrome. */
+			embedRoot: {
+				display: "flex",
+				flexDirection: "column",
+				height: "100%",
+				minHeight: 0,
+				width: "100%",
+				fontFamily: T.font,
+				color: T.text,
+				fontSize: 14,
+				lineHeight: 1.5,
+				boxSizing: "border-box"
+			},
+			embedPanel: {
+				display: "flex",
+				flexDirection: "column",
+				flex: 1,
+				minHeight: 0,
+				overflow: "hidden"
+			},
+			/** Embedded: the Settings content area already supplies the horizontal gutter. */
+			embedHead: {
+				display: "flex",
+				alignItems: "center",
+				gap: 12,
+				padding: "0 0 14px",
+				borderBottom: `1px solid ${T.border}`
+			},
+			embedTabBar: {
+				display: "flex",
+				gap: 4,
+				alignItems: "center",
+				flexShrink: 0,
+				borderBottom: `1px solid ${T.border}`,
+				padding: 0
+			},
+			embedBody: {
+				flex: 1,
+				overflow: "auto",
+				padding: "14px 0 0"
+			},
+			embedPagerBar: {
+				flexShrink: 0,
+				borderTop: `1px solid ${T.border}`,
+				padding: "12px 0 0"
 			},
 			tabBar: {
 				display: "flex",
@@ -747,7 +794,7 @@ window.__ModuleLoader__.load({
 			"once",
 			"interval"
 		];
-		function SchedulerPanel({ onClose, t, sessions, workspaces, uiWorkspace, resolveUiWorkspace, describeContext }) {
+		function SchedulerPanel({ onClose, embedded = false, t, sessions, workspaces, uiWorkspace, resolveUiWorkspace, describeContext }) {
 			const [view, setView] = (0, react.useState)("list");
 			const [tasks, setTasks] = (0, react.useState)([]);
 			const [history, setHistory] = (0, react.useState)([]);
@@ -829,7 +876,7 @@ window.__ModuleLoader__.load({
 				}
 				try {
 					nav.openSession(sessionId);
-					onClose();
+					onClose?.();
 				} catch {
 					setError("会话不存在或已被清理 / session not found");
 				}
@@ -845,8 +892,9 @@ window.__ModuleLoader__.load({
 			};
 			(0, react.useEffect)(() => {
 				reload();
+				if (embedded === true) return;
 				const onKey = (e) => {
-					if (e.key === "Escape") onClose();
+					if (e.key === "Escape") onClose?.();
 				};
 				window.addEventListener("keydown", onKey);
 				return () => window.removeEventListener("keydown", onKey);
@@ -1103,15 +1151,15 @@ window.__ModuleLoader__.load({
 			const execResult = view === "executions" ? pageSlice(allHistory, execPage, execPageSize) : null;
 			const histResult = view === "history" ? pageSlice(history, histPage, histPageSize) : null;
 			return /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
-				style: S.overlay,
-				onClick: (e) => {
-					if (e.target === e.currentTarget) onClose();
+				style: embedded ? S.embedRoot : S.overlay,
+				onClick: embedded ? void 0 : (e) => {
+					if (e.target === e.currentTarget) onClose?.();
 				},
 				children: /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-					style: S.panel,
+					style: embedded ? S.embedPanel : S.panel,
 					children: [
 						/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-							style: S.head,
+							style: embedded ? S.embedHead : S.head,
 							children: [
 								/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
 									style: {
@@ -1129,7 +1177,7 @@ window.__ModuleLoader__.load({
 									children: t("panel.subtitle")
 								}),
 								/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", { style: S.spacer }),
-								/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+								!embedded && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
 									style: S.iconBtn,
 									title: t("btn.close"),
 									onClick: onClose,
@@ -1138,7 +1186,7 @@ window.__ModuleLoader__.load({
 							]
 						}),
 						(view === "list" || view === "executions") && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-							style: S.tabBar,
+							style: embedded ? S.embedTabBar : S.tabBar,
 							children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
 								style: {
 									...S.tab,
@@ -1156,7 +1204,7 @@ window.__ModuleLoader__.load({
 							})]
 						}),
 						/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-							style: S.body,
+							style: embedded ? S.embedBody : S.body,
 							ref: bodyRef,
 							children: [
 								error !== null && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
@@ -1813,7 +1861,7 @@ window.__ModuleLoader__.load({
 							]
 						}),
 						view === "executions" && execResult !== null && allHistory.length > 0 && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
-							style: S.pagerBar,
+							style: embedded ? S.embedPagerBar : S.pagerBar,
 							children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)(Pager, {
 								page: execResult.pageSafe,
 								pages: execResult.pages,
@@ -1832,7 +1880,7 @@ window.__ModuleLoader__.load({
 							})
 						}),
 						view === "history" && histResult !== null && history.length > 0 && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
-							style: S.pagerBar,
+							style: embedded ? S.embedPagerBar : S.pagerBar,
 							children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)(Pager, {
 								page: histResult.pageSafe,
 								pages: histResult.pages,
@@ -2024,76 +2072,28 @@ window.__ModuleLoader__.load({
 			if (task.type === "interval") return `${t("type.interval")} · ${task.everyMinutes} min`;
 			return task.cron;
 		}
-		// src/client/SchedulerEntry.tsx
+		// src/client/SchedulerSection.tsx
 		/**
-		* Sidebar footer entry: a native-looking "调度器" row (icon + label) mounted in
-		* the left sidebar's footer.action slot. Clicking opens the scheduler panel.
+		* The Settings → 定时任务 section. The host renders `settings.section` entries
+		* inside its own dialog and passes the dialog's `close` down as an owner prop,
+		* so this is a thin adapter: the scheduler UI itself stays in SchedulerPanel.
 		*/
-		function SchedulerEntry({ t, sessions, workspaces, uiWorkspace, resolveUiWorkspace, describeContext }) {
-			const [open, setOpen] = (0, react.useState)(false);
-			return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("button", {
-				type: "button",
-				title: t("entry.label"),
-				onClick: () => setOpen(true),
-				style: {
-					boxSizing: "border-box",
-					cursor: "pointer",
-					width: "calc(100% + 4px)",
-					height: 42,
-					color: "var(--dsw-alias-label-primary)",
-					background: "transparent",
-					border: "none",
-					borderRadius: 12,
-					display: "flex",
-					alignItems: "center",
-					gap: 10,
-					margin: "4px -2px",
-					padding: "0 10px 0 8px",
-					fontFamily: "inherit",
-					fontSize: 14,
-					lineHeight: "22px",
-					justifyContent: "flex-start",
-					transition: "background .15s"
-				},
-				onMouseEnter: (e) => {
-					e.currentTarget.style.background = "var(--dsw-alias-interactive-bg-hover)";
-				},
-				onMouseLeave: (e) => {
-					e.currentTarget.style.background = "transparent";
-				},
-				children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-					style: {
-						display: "inline-flex",
-						color: "var(--dsw-alias-label-secondary)",
-						flexShrink: 0
-					},
-					children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)(IconClock, { size: 16 })
-				}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-					style: {
-						whiteSpace: "nowrap",
-						overflow: "hidden",
-						flex: 1,
-						textAlign: "left"
-					},
-					children: t("entry.label")
-				})]
-			}), open && /* @__PURE__ */ (0, react_jsx_runtime.jsx)(SchedulerPanel, {
-				onClose: () => setOpen(false),
-				t,
-				sessions,
-				workspaces,
-				uiWorkspace,
-				resolveUiWorkspace,
-				describeContext
-			})] });
+		function SchedulerSection({ close, ...panel }) {
+			return (0, react.createElement)(SchedulerPanel, {
+				...panel,
+				embedded: true,
+				onClose: () => close?.()
+			});
 		}
 		// src/client/index.ts
 		/**
-		* dsh-scheduler client: registers a "调度器" entry in the left sidebar's
-		* footer.action slot (same pattern as dsh-knj-workflow's "新建任务" entry).
-		* Built by tsdown into the __ModuleLoader__ factory bundle at client/client.js.
+		* dsh-scheduler client: registers the scheduler as a Settings → 定时任务
+		* section (`settings.section`), so it opens from the host's Settings dialog
+		* and no longer needs the dsh-knj-menu sidebar. Built by tsdown into the
+		* __ModuleLoader__ factory bundle at client/client.js.
 		*/
 		const NS = "dsh-scheduler";
+		const SECTION_ID = "dsh-scheduler";
 		const name = "dsh-scheduler";
 		const inject = [
 			"locale",
@@ -2111,7 +2111,7 @@ window.__ModuleLoader__.load({
 			const sessions = ctx.sessions;
 			const workspaces = ctx.workspaces;
 			/**
-			* Read navigation at click time, not at apply time: the sidebar entry is
+			* Read navigation at click time, not at apply time: the Settings section is
 			* registered once and captures this closure, so a service provided later in
 			* boot would otherwise stay frozen as `undefined`.
 			*/
@@ -2131,20 +2131,25 @@ window.__ModuleLoader__.load({
 			};
 			ctx.effect(() => {
 				if (!ctx.slots) return;
-				ctx.slots.inject("knj.menu.item", () => ctx.slots.register({
-					name: "knj.menu.item",
-					id: "dsh-scheduler",
-					order: 20,
-					locale: "zh"
-				}, () => (0, react.createElement)(SchedulerEntry, {
-					t,
-					sessions,
-					workspaces,
-					uiWorkspace: ctx.uiWorkspace,
-					resolveUiWorkspace,
-					describeContext
-				})));
-			}, "dsh-scheduler: sidebar entry");
+				ctx.slots.inject("settings.section", () => ctx.slots.register({
+					name: "settings.section",
+					id: SECTION_ID,
+					order: 30,
+					label: () => t("panel.title"),
+					locale: NS
+				}, (props) => {
+					const close = props?.close;
+					return (0, react.createElement)(SchedulerSection, {
+						close,
+						t,
+						sessions,
+						workspaces,
+						uiWorkspace: ctx.uiWorkspace,
+						resolveUiWorkspace,
+						describeContext
+					});
+				}));
+			}, "dsh-scheduler: settings section");
 		}
 		exports.apply = apply;
 		exports.inject = inject;

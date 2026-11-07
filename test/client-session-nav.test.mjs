@@ -15,7 +15,7 @@ import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..')
-const CLIENT_SOURCES = ['index.ts', 'SchedulerEntry.tsx', 'SchedulerPanel.tsx']
+const CLIENT_SOURCES = ['index.ts', 'SchedulerSection.tsx', 'SchedulerPanel.tsx']
 const SESSIONS_OPEN = /sessions\s*\??\.\s*open\s*\(/g
 const UI_WORKSPACE_OPEN = /uiWorkspace\s*\??\.\s*openSession\s*\(/
 
@@ -57,15 +57,14 @@ test('the panel navigates through uiWorkspace.openSession', () => {
   )
 })
 
-test('the sidebar entry forwards uiWorkspace to the panel', () => {
-  const text = readClientSource('SchedulerEntry.tsx')
-  // Non-greedy through the closing `/>`: props include `=>` arrows, so a
-  // `[^>]*` scan would stop inside the first callback.
-  const panelTag = text.match(/<SchedulerPanel[\s\S]*?\/>/)
-  assert.ok(panelTag !== null, 'SchedulerEntry must render <SchedulerPanel … />')
+test('the Settings section forwards the host services to the panel', () => {
+  const section = readClientSource('SchedulerSection.tsx')
+  assert.ok(section.includes('SchedulerPanel'), 'SchedulerSection must render SchedulerPanel')
+  assert.ok(/embedded:\s*true/.test(section), 'SchedulerSection must render the panel embedded')
+  const index = readClientSource('index.ts')
   assert.ok(
-    /uiWorkspace\s*=/.test(panelTag[0]),
-    `SchedulerEntry must pass uiWorkspace into SchedulerPanel, got: ${panelTag[0]}`,
+    /uiWorkspace:\s*ctx\.uiWorkspace/.test(index),
+    'the settings.section registration must pass uiWorkspace into SchedulerSection',
   )
 })
 
