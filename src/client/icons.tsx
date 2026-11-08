@@ -1,19 +1,15 @@
 /**
- * One consistent 16px line-icon set (stroke = currentColor, weight 1.5).
- * Replaces the previous emoji glyphs (⏰ ＋ ↻ ✓ ✕ ○) so icons render the same
- * on every platform and read as part of the host UI.
+ * One icon set: 16px box, stroke 1.5, currentColor, round joins.
+ * Every call site renders these at 16px — the size prop was removed so the
+ * inventory cannot drift back to six different icon sizes.
  */
 import type { ReactNode } from 'react'
 
-interface IconProps {
-  size?: number
-}
-
-function Svg({ size = 16, children }: IconProps & { children: ReactNode }) {
+function Svg({ children }: { children: ReactNode }) {
   return (
     <svg
-      width={size}
-      height={size}
+      width={16}
+      height={16}
       viewBox="0 0 16 16"
       fill="none"
       stroke="currentColor"
@@ -28,51 +24,51 @@ function Svg({ size = 16, children }: IconProps & { children: ReactNode }) {
   )
 }
 
-export function IconClock({ size }: IconProps) {
+export function IconClock() {
   return (
-    <Svg size={size}>
+    <Svg>
       <circle cx="8" cy="8" r="6.25" />
       <path d="M8 4.5V8l2.4 1.5" />
     </Svg>
   )
 }
 
-export function IconPlus({ size }: IconProps) {
+export function IconPlus() {
   return (
-    <Svg size={size}>
+    <Svg>
       <path d="M8 3.2v9.6M3.2 8h9.6" />
     </Svg>
   )
 }
 
-export function IconRefresh({ size }: IconProps) {
+export function IconRefresh() {
   return (
-    <Svg size={size}>
+    <Svg>
       <path d="M13.2 8a5.2 5.2 0 1 1-1.5-3.7" />
       <path d="M13.4 2.6v3h-3" />
     </Svg>
   )
 }
 
-export function IconEdit({ size }: IconProps) {
+export function IconEdit() {
   return (
-    <Svg size={size}>
+    <Svg>
       <path d="M11.3 2.7a1.4 1.4 0 0 1 2 2L5 13l-3 .7.7-3 8.6-8z" />
     </Svg>
   )
 }
 
-export function IconPlay({ size }: IconProps) {
+export function IconPlay() {
   return (
-    <Svg size={size}>
-      <path d="M5 3.2v9.6l7.4-4.8z" fill="currentColor" stroke="none" />
+    <Svg>
+      <path d="M5.2 3.4v9.2l7.1-4.6z" />
     </Svg>
   )
 }
 
-export function IconHistory({ size }: IconProps) {
+export function IconHistory() {
   return (
-    <Svg size={size}>
+    <Svg>
       <path d="M2.8 8a5.2 5.2 0 1 1 1.5 3.7" />
       <path d="M2.8 6.5V9.5h3" />
       <path d="M8 4.6V8l2.3 1.4" />
@@ -80,35 +76,34 @@ export function IconHistory({ size }: IconProps) {
   )
 }
 
-export function IconTrash({ size }: IconProps) {
+export function IconCheck() {
   return (
-    <Svg size={size}>
-      <path d="M2.8 4.4h10.4M6.4 4.4V3.2a.8.8 0 0 1 .8-.8h1.6a.8.8 0 0 1 .8.8v1.2M4.4 4.4l.6 8a1 1 0 0 0 1 .9h4a1 1 0 0 0 1-.9l.6-8" />
-      <path d="M6.6 7v3.6M9.4 7v3.6" />
-    </Svg>
-  )
-}
-
-export function IconCheck({ size }: IconProps) {
-  return (
-    <Svg size={size}>
+    <Svg>
       <path d="M3.2 8.4l3 3 6.6-6.8" />
     </Svg>
   )
 }
 
-export function IconCross({ size }: IconProps) {
+export function IconCross() {
   return (
-    <Svg size={size}>
+    <Svg>
       <path d="M4 4l8 8M12 4l-8 8" />
     </Svg>
   )
 }
 
-export function IconChevronLeft({ size }: IconProps) {
+export function IconChevronLeft() {
   return (
-    <Svg size={size}>
+    <Svg>
       <path d="M10 3.5L5.5 8l4.5 4.5" />
+    </Svg>
+  )
+}
+
+export function IconChevronDown() {
+  return (
+    <Svg>
+      <path d="M3.5 6L8 10.5 12.5 6" />
     </Svg>
   )
 }

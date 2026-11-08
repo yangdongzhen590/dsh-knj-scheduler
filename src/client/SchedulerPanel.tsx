@@ -1,8 +1,9 @@
 /**
  * Scheduler panel: task list / create-edit form / execution history. Rendered
  * inline as the Settings → 定时任务 section (`embedded`), or as a standalone
- * modal when `embedded` is false. Styled with the host's --dsw-alias design
- * tokens so it reads as a native DSH surface (no hardcoded palette, no emoji).
+ * modal when `embedded` is false. Styled only with host aliases: a neutral
+ * paper surface, black ticks, one cobalt signal (--dsw-static-deepseek-500)
+ * for the scale, focus rings and the active tab. No emoji, no gradients.
  *
  * Trigger types: cron (expression), once (specific time), interval (every N min).
  * The form previews the next run time live via /dsh-scheduler/preview.
@@ -11,7 +12,7 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import type { Dict } from './locales.ts'
 import * as api from './api.ts'
 import type { ExecutionKind, HistoryEntry, TaskInput, TaskType, TaskView, WorkflowAttachmentRef, WorkflowChoice } from './api.ts'
-import { IconCheck, IconChevronLeft, IconClock, IconCross, IconEdit, IconHistory, IconPlay, IconPlus, IconRefresh, IconTrash } from './icons.tsx'
+import { IconCheck, IconChevronDown, IconChevronLeft, IconClock, IconCross, IconEdit, IconHistory, IconPlay, IconPlus, IconRefresh } from './icons.tsx'
 import { PAGE_SIZES, pageSlice, fmt } from './pager.ts'
 import type { SessionsService, UiWorkspaceService, WorkspacesService } from './index.ts'
 
@@ -33,129 +34,302 @@ export interface SchedulerPanelProps {
 }
 
 const CRON_RE = /^[0-9*,/\-?L#w]+ [0-9*,/\-?L#w]+ [0-9*,/\-?L#w]+ [0-9*,/\-?L#w]+ [0-9*,/\-?L#w]+(\s+[0-9*,/\-?L#w]+)?$/
+const MONO = 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace'
+const EASE = 'cubic-bezier(0.22, 1, 0.36, 1)'
 
-// Design tokens (single source; no raw hex anywhere else in this file).
+// Semantic aliases: every colour derives from a host token (no raw palette).
 const T = {
+  bg: 'var(--dsw-alias-bg-base)',
+  layer: 'var(--dsw-alias-bg-layer-1)',
   text: 'var(--dsw-alias-label-primary)',
   text2: 'var(--dsw-alias-label-secondary)',
-  text3: 'var(--dsw-alias-label-tertiary)',
-  card: 'var(--dsw-alias-bg-layer-1)',
-  surface: 'var(--dsw-alias-bg-layer-2)',
-  border: 'var(--dsw-alias-border-l2)',
-  accent: 'var(--dsw-alias-brand-primary)',
+  hairline: 'color-mix(in srgb, var(--dsw-alias-label-primary) 8%, transparent)',
+  strong: 'color-mix(in srgb, var(--dsw-alias-label-primary) 12%, transparent)',
+  surface: 'color-mix(in srgb, var(--dsw-alias-label-primary) 3%, var(--dsw-alias-bg-layer-1))',
+  surfaceHover: 'color-mix(in srgb, var(--dsw-alias-label-primary) 6%, var(--dsw-alias-bg-layer-1))',
+  tick: 'color-mix(in srgb, var(--dsw-alias-label-primary) 20%, transparent)',
+  signal: 'var(--dsw-static-deepseek-500)',
+  primary: 'var(--dsw-alias-brand-primary)',
+  onPrimary: 'var(--dsw-alias-bg-base)',
   success: 'var(--dsw-static-green-500)',
   danger: 'var(--dsw-alias-state-error-primary)',
-  warn: 'var(--dsw-static-yellow-500)',
-  hover: 'var(--dsw-alias-interactive-bg-hover)',
+  warn: 'var(--dsw-alias-state-warn-primary)',
   font: 'var(--dsw-font-family)',
 }
 
 const S: Record<string, React.CSSProperties> = {
   overlay: {
     position: 'fixed', inset: 0, zIndex: 1000,
-    background: 'rgba(0,0,0,.55)', display: 'flex', alignItems: 'center', justifyContent: 'center',
-    fontFamily: T.font, color: T.text, fontSize: 14, lineHeight: 1.5,
+    background: 'rgba(0,0,0,.45)', display: 'flex', alignItems: 'center', justifyContent: 'center',
+    fontFamily: T.font, color: T.text, fontSize: 14, lineHeight: '20px',
   },
   panel: {
     width: 720, maxWidth: '94vw', height: '80vh', display: 'flex', flexDirection: 'column',
-    background: T.surface, border: `1px solid ${T.border}`, borderRadius: 14,
-    boxShadow: '0 24px 80px rgba(0,0,0,.45)', overflow: 'hidden',
+    background: T.layer, border: `1px solid ${T.hairline}`, borderRadius: 16,
+    boxShadow: '0 24px 64px rgba(0,0,0,.28)', overflow: 'hidden',
   },
-  /** Embedded: fill the Settings content area, no modal chrome. */
   embedRoot: {
     display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0, width: '100%',
-    fontFamily: T.font, color: T.text, fontSize: 14, lineHeight: 1.5, boxSizing: 'border-box',
+    fontFamily: T.font, color: T.text, fontSize: 14, lineHeight: '20px', boxSizing: 'border-box',
   },
   embedPanel: { display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, overflow: 'hidden' },
-  /** Embedded: the Settings content area already supplies the horizontal gutter. */
-  embedHead: { display: 'flex', alignItems: 'center', gap: 12, padding: '0 0 14px', borderBottom: `1px solid ${T.border}` },
-  embedTabBar: {
-    display: 'flex', gap: 4, alignItems: 'center', flexShrink: 0,
-    borderBottom: `1px solid ${T.border}`, padding: 0,
+  head: {
+    display: 'flex', alignItems: 'center', gap: 12, flexShrink: 0,
+    padding: '0 0 16px', borderBottom: `1px solid ${T.hairline}`,
   },
-  embedBody: { flex: 1, overflow: 'auto', padding: '14px 0 0' },
-  embedPagerBar: { flexShrink: 0, borderTop: `1px solid ${T.border}`, padding: '12px 0 0' },
-  tabBar: {
-    display: 'flex', gap: 4, alignItems: 'center', flexShrink: 0,
-    borderBottom: `1px solid ${T.border}`, padding: '0 16px',
+  embedHead: {
+    display: 'flex', alignItems: 'center', gap: 12, flexShrink: 0,
+    padding: '0 0 16px', borderBottom: `1px solid ${T.hairline}`,
   },
-  tab: {
-    display: 'inline-flex', alignItems: 'center', gap: 6, height: 38, padding: '0 14px',
-    border: 'none', background: 'transparent', color: T.text2, fontSize: 13.5,
-    cursor: 'pointer', fontFamily: T.font, marginBottom: -1,
-    borderBottom: '2px solid transparent', transition: 'color .15s',
-  },
-  tabOn: { color: T.accent, borderBottomColor: T.accent, fontWeight: 500 },
-  pagerBar: { flexShrink: 0, borderTop: `1px solid ${T.border}`, background: T.surface, padding: '12px 20px' },
-  head: { display: 'flex', alignItems: 'center', gap: 12, padding: '16px 20px', borderBottom: `1px solid ${T.border}` },
-  title: { fontSize: 16, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 10 },
-  sub: { color: T.text3, fontSize: 12 },
+  headTitleCol: { display: 'flex', flexDirection: 'column', gap: 4, flex: 1, minWidth: 0 },
+  titleIcon: { color: T.text, display: 'inline-flex', flexShrink: 0 },
+  title: { fontSize: 16, lineHeight: '22px', fontWeight: 500, color: T.text, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' },
+  sub: { color: T.text2, fontSize: 12, lineHeight: '16px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' },
   spacer: { flex: 1 },
+  tabBar: {
+    display: 'flex', gap: 20, alignItems: 'center', flexShrink: 0,
+    borderBottom: `1px solid ${T.hairline}`, padding: '0 20px',
+  },
+  embedTabBar: {
+    display: 'flex', gap: 20, alignItems: 'center', flexShrink: 0,
+    borderBottom: `1px solid ${T.hairline}`, padding: 0,
+  },
   body: { flex: 1, overflow: 'auto', padding: '16px 20px' },
-  err: {
-    display: 'flex', alignItems: 'center', gap: 8, background: 'color-mix(in srgb, var(--dsw-alias-state-error-primary) 12%, transparent)',
-    border: `1px solid ${T.danger}`, color: T.danger, borderRadius: 10, padding: '10px 14px', marginBottom: 14, fontSize: 13,
+  embedBody: { flex: 1, overflow: 'auto', padding: '16px 0 0' },
+  footer: {
+    flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8,
+    padding: '12px 20px', borderTop: `1px solid ${T.hairline}`, background: T.layer,
   },
-  toolbar: { display: 'flex', gap: 8, marginBottom: 16, alignItems: 'center' },
-  card: {
-    border: `1px solid ${T.border}`, background: T.card, borderRadius: 12,
-    padding: '14px 16px', marginBottom: 10,
+  embedFooter: {
+    flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8,
+    padding: '12px 0 0', borderTop: `1px solid ${T.hairline}`,
   },
-  cardTop: { display: 'flex', alignItems: 'center', gap: 10 },
-  name: { fontWeight: 600, fontSize: 14, flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
-  meta: { display: 'flex', alignItems: 'center', gap: 12, marginTop: 6, flexWrap: 'wrap' },
-  metaItem: { display: 'inline-flex', alignItems: 'center', gap: 5, color: T.text3, fontSize: 12 },
-  cron: { fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace', color: T.accent, fontSize: 12 },
-  prompt: { color: T.text2, fontSize: 12.5, marginTop: 8, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
-  actions: { display: 'flex', gap: 8, marginTop: 12, paddingTop: 12, borderTop: `1px solid ${T.border}`, alignItems: 'center' },
-  pill: { display: 'inline-flex', alignItems: 'center', gap: 5, padding: '2px 10px', borderRadius: 999, fontSize: 12, fontWeight: 500 },
-  btn: {
-    display: 'inline-flex', alignItems: 'center', gap: 6, height: 32, padding: '0 13px',
-    borderRadius: 999, border: `1px solid ${T.border}`, background: T.card, color: T.text,
-    cursor: 'pointer', fontSize: 13, fontFamily: T.font, transition: 'background .15s,color .15s',
+  pagerBar: { flexShrink: 0, borderTop: `1px solid ${T.hairline}`, padding: '12px 20px' },
+  embedPagerBar: { flexShrink: 0, borderTop: `1px solid ${T.hairline}`, padding: '12px 0 0' },
+  pager: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' },
+  pagerGroup: { display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' },
+  pagerInfo: { fontSize: 12, lineHeight: '16px', color: T.text2, whiteSpace: 'nowrap' },
+  toolbar: { display: 'flex', gap: 8, marginBottom: 16, alignItems: 'center', flexWrap: 'wrap' },
+  metaText: { color: T.text2, fontSize: 12, lineHeight: '16px' },
+  banner: {
+    display: 'flex', alignItems: 'center', gap: 8,
+    borderRadius: 8, padding: '8px 12px', marginBottom: 16,
+    fontSize: 13, lineHeight: '18px', color: T.text, border: '1px solid',
   },
-  btnPrimary: {
-    display: 'inline-flex', alignItems: 'center', gap: 6, height: 32, padding: '0 14px',
-    borderRadius: 999, border: 'none', background: T.accent, color: '#fff',
-    cursor: 'pointer', fontSize: 13, fontWeight: 500, fontFamily: T.font,
+  taskList: { background: T.surface, border: `1px solid ${T.hairline}`, borderRadius: 12, overflow: 'hidden' },
+  taskRow: { display: 'flex', flexDirection: 'column', gap: 8, padding: 16, color: T.text },
+  taskHead: { display: 'flex', alignItems: 'flex-start', gap: 12 },
+  taskIdentity: { display: 'flex', flexDirection: 'column', gap: 2, flex: 1, minWidth: 0 },
+  taskName: { fontSize: 14, lineHeight: '20px', fontWeight: 500, color: T.text, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
+  taskCwd: { color: T.text2, fontSize: 12, lineHeight: '16px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
+  taskActions: {
+    display: 'flex', alignItems: 'center', gap: 4, flexWrap: 'wrap',
+    marginTop: 4, paddingTop: 12, borderTop: `1px solid ${T.hairline}`,
   },
-  btnDanger: {
-    display: 'inline-flex', alignItems: 'center', gap: 6, height: 32, padding: '0 13px',
-    borderRadius: 999, border: `1px solid ${T.danger}`, background: 'transparent', color: T.danger,
-    cursor: 'pointer', fontSize: 13, fontFamily: T.font,
+  taskActionsEnd: { marginLeft: 'auto' },
+  triggerMono: {
+    fontFamily: MONO, fontVariantNumeric: 'tabular-nums', fontFeatureSettings: '"tnum" 1',
+    fontSize: 12, lineHeight: '16px', color: T.text2, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
   },
-  iconBtn: {
-    display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 32, height: 32,
-    borderRadius: 8, border: 'none', background: 'transparent', color: T.text3, cursor: 'pointer',
-    transition: 'background .15s,color .15s',
+  summary: {
+    margin: 0, color: T.text2, fontSize: 13, lineHeight: '18px',
+    display: '-webkit-box', WebkitBoxOrient: 'vertical', WebkitLineClamp: 2, overflow: 'hidden', overflowWrap: 'anywhere',
   },
-  input: {
-    width: '100%', boxSizing: 'border-box', background: T.card, border: `1px solid ${T.border}`,
-    borderRadius: 10, padding: '9px 12px', color: T.text, fontSize: 14, outline: 'none', fontFamily: T.font,
+  dayScale: { display: 'flex', flexDirection: 'column', gap: 4, marginTop: 4 },
+  dayScaleLabel: { color: T.text2, fontSize: 12, lineHeight: '16px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' },
+  dayTrack: { position: 'relative', height: 16, marginTop: 2, marginBottom: 2 },
+  dayBaseline: { position: 'absolute', left: 0, right: 0, top: 6, height: 1, background: T.hairline },
+  dayTick: { position: 'absolute', top: 0, width: 1, transform: 'translateX(-50%)' },
+  dayLabels: { display: 'flex', justifyContent: 'space-between', color: T.text2, fontSize: 12, lineHeight: '16px' },
+  dayMarkerWrap: {
+    position: 'absolute', top: 0, height: 16, width: 0,
+    transform: 'translateX(-50%)', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2,
   },
-  label: { display: 'block', fontSize: 13, color: T.text2, marginBottom: 6 },
-  field: { marginBottom: 16 },
-  hint: { marginTop: 6, fontSize: 12 },
-  nextRun: { display: 'inline-flex', alignItems: 'center', gap: 5, marginTop: 8, fontSize: 12, color: T.text2 },
-  seg: {
-    display: 'inline-flex', alignItems: 'center', gap: 6, height: 32, padding: '0 14px',
-    borderRadius: 999, border: `1px solid ${T.border}`, background: 'transparent', color: T.text2,
-    cursor: 'pointer', fontSize: 13, fontFamily: T.font, transition: 'background .15s,color .15s',
+  dayMarkerBar: { width: 2, height: 8, borderRadius: 1, background: T.signal },
+  dayMarkerDot: { width: 6, height: 6, borderRadius: '50%', background: T.signal, boxShadow: `0 0 0 2px ${T.surface}` },
+  empty: { padding: '48px 24px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8, textAlign: 'center' },
+  emptyTitle: { color: T.text, fontSize: 14, lineHeight: '20px', fontWeight: 500 },
+  emptyHint: { color: T.text2, fontSize: 13, lineHeight: '18px', maxWidth: 320 },
+  emptyAction: { marginTop: 8 },
+  logSurface: { position: 'relative', background: T.surface, border: `1px solid ${T.hairline}`, borderRadius: 12, padding: '4px 0', overflow: 'hidden' },
+  rail: { position: 'absolute', left: 19, top: 12, bottom: 12, width: 1, background: T.hairline, zIndex: 2, pointerEvents: 'none' },
+  logRow: { position: 'relative', display: 'grid', columnGap: 12, alignItems: 'center', minHeight: 44, padding: '8px 16px 8px 40px', color: T.text, zIndex: 1 },
+  logDot: { position: 'absolute', left: 16, top: '50%', width: 7, height: 7, marginTop: -3.5, borderRadius: '50%', zIndex: 3, boxShadow: `0 0 0 2px ${T.surface}` },
+  logName: { fontSize: 13, lineHeight: '18px', color: T.text, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
+  logTime: {
+    fontFamily: MONO, fontVariantNumeric: 'tabular-nums', fontFeatureSettings: '"tnum" 1',
+    fontSize: 12, lineHeight: '16px', color: T.text2, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
   },
-  segOn: { background: 'color-mix(in srgb, var(--dsw-alias-brand-primary) 16%, transparent)', borderColor: T.accent, color: T.accent, fontWeight: 500 },
-  formCard: { maxWidth: 560, background: T.card, border: `1px solid ${T.border}`, borderRadius: 12, padding: 18 },
-  foot: { display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 4 },
-  empty: { color: T.text3, textAlign: 'center', padding: '48px 0', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10 },
-  row: { display: 'flex', alignItems: 'center', gap: 12, padding: '12px 14px', border: `1px solid ${T.border}`, borderRadius: 10, marginBottom: 6, background: T.card },
+  logStatus: { fontSize: 12, lineHeight: '16px', color: T.text2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
+  logDuration: { fontFamily: MONO, fontVariantNumeric: 'tabular-nums', fontSize: 12, lineHeight: '16px', color: T.text2, textAlign: 'right' },
+  logActions: { display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 4, flexShrink: 0 },
+  group: { paddingTop: 24, marginTop: 24, borderTop: `1px solid ${T.hairline}` },
+  groupFirst: { paddingTop: 0, marginTop: 0, borderTop: 'none' },
+  groupTitle: { display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, lineHeight: '18px', fontWeight: 500, color: T.text, marginBottom: 16 },
+  groupTick: { width: 4, height: 12, borderRadius: 1, background: T.signal, display: 'inline-block', flexShrink: 0 },
+  field: { marginBottom: 20 },
+  fieldLast: { marginBottom: 0 },
+  label: { display: 'block', fontSize: 13, lineHeight: '18px', fontWeight: 500, color: T.text2, marginBottom: 8 },
+  required: { color: T.text, fontWeight: 500 },
+  hint: { marginTop: 8, fontSize: 12, lineHeight: '16px', color: T.text2 },
+  errorText: { marginTop: 8, fontSize: 12, lineHeight: '16px', color: T.danger },
+  inputRow: { display: 'flex', gap: 8, alignItems: 'flex-start' },
+  selectWrap: { position: 'relative', width: '100%' },
+  selectChevron: { position: 'absolute', right: 12, top: '50%', transform: 'translateY(-50%)', color: T.text2, pointerEvents: 'none', display: 'inline-flex' },
+  segRow: { display: 'flex', gap: 8, flexWrap: 'wrap' },
+  upcoming: { marginTop: 8 },
+  upcomingLabel: { color: T.text2, fontSize: 12, lineHeight: '16px', marginBottom: 4 },
+  upcomingList: { display: 'flex', flexDirection: 'column', gap: 4, fontFamily: MONO, fontVariantNumeric: 'tabular-nums', fontSize: 12, lineHeight: '16px', color: T.text2 },
+  nextValue: { fontFamily: MONO, fontVariantNumeric: 'tabular-nums', fontSize: 14, lineHeight: '20px', color: T.text },
+  nextEmpty: { fontFamily: MONO, fontSize: 13, lineHeight: '18px', color: T.text2 },
+  details: { marginTop: 12, fontSize: 13, lineHeight: '18px', color: T.text2 },
+  detailSummary: { cursor: 'pointer', width: 'fit-content', color: T.text2 },
+  detailText: { margin: '8px 0 0' },
+  chipName: { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 240 },
+  pathRow: { display: 'grid', gridTemplateColumns: 'minmax(96px, 140px) minmax(0, 1fr) auto', gap: 8, alignItems: 'center', marginTop: 8 },
+  pathName: { fontSize: 12, lineHeight: '16px', color: T.text2, overflow: 'hidden', textOverflow: 'ellipsis' },
+  code: { fontFamily: MONO, fontSize: 12, lineHeight: '16px', color: T.text2, whiteSpace: 'nowrap' },
+  switchLabel: { fontSize: 13, lineHeight: '18px', color: T.text2 },
 }
 
-function Pill({ ok, children }: { ok: boolean; children: ReactNode }) {
-  return (
-    <span style={{ ...S.pill, ...(ok ? { background: 'color-mix(in srgb, var(--dsw-static-green-500) 14%, transparent)', color: T.success } : { background: 'color-mix(in srgb, var(--dsw-alias-label-tertiary) 16%, transparent)', color: T.text3 }) }}>
-      {children}
-    </span>
-  )
+/** Interaction states that inline style objects cannot express. Scoped to this panel. */
+const PANEL_CSS = `
+.dss-root, .dss-root *, .dss-root *::before, .dss-root *::after { box-sizing: border-box; }
+.dss-root button, .dss-root input, .dss-root select, .dss-root textarea, .dss-root summary { font-family: inherit; outline: none; }
+.dss-root button:focus-visible, .dss-root input:focus-visible, .dss-root select:focus-visible,
+.dss-root textarea:focus-visible, .dss-root summary:focus-visible, .dss-root [role="switch"]:focus-visible {
+  outline: 2px solid var(--dsw-static-deepseek-500); outline-offset: 2px;
 }
+.dss-btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+  height: 32px; padding: 0 12px; border-radius: 8px; border: 1px solid transparent;
+  background: transparent; color: var(--dsw-alias-label-primary);
+  font-size: 13px; line-height: 18px; font-weight: 400; white-space: nowrap; cursor: pointer;
+  transition: background-color .12s ${EASE}, border-color .12s ${EASE}, color .12s ${EASE}, opacity .12s ${EASE}, transform .12s ${EASE};
+}
+.dss-btn:active:not(:disabled) { transform: scale(.98); }
+.dss-btn:disabled { opacity: .4; cursor: default; }
+.dss-btn-sm { height: 28px; padding: 0 8px; border-radius: 6px; font-size: 13px; }
+.dss-btn-field { height: 36px; padding: 0 12px; }
+.dss-btn-primary {
+  background: var(--dsw-alias-brand-primary); color: var(--dsw-alias-bg-base);
+  border-color: transparent; font-weight: 500;
+}
+.dss-btn-primary:hover:not(:disabled) { opacity: .9; }
+.dss-btn-primary:disabled {
+  opacity: 1; cursor: default;
+  background: color-mix(in srgb, var(--dsw-alias-label-primary) 8%, transparent);
+  color: var(--dsw-alias-label-secondary);
+}
+.dss-btn-outline {
+  background: color-mix(in srgb, var(--dsw-alias-label-primary) 4%, transparent);
+  border-color: color-mix(in srgb, var(--dsw-alias-label-primary) 20%, transparent);
+  color: var(--dsw-alias-label-primary); font-weight: 500;
+}
+.dss-btn-outline:hover:not(:disabled) { background: color-mix(in srgb, var(--dsw-alias-label-primary) 6%, transparent); }
+.dss-btn-ghost { color: var(--dsw-alias-label-secondary); }
+.dss-btn-ghost:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--dsw-alias-label-primary) 6%, var(--dsw-alias-bg-layer-1));
+  color: var(--dsw-alias-label-primary);
+}
+.dss-btn-danger {
+  --dss-danger-ink: color-mix(in srgb, var(--dsw-alias-state-error-primary) 76%, var(--dsw-alias-label-primary));
+  color: var(--dss-danger-ink);
+}
+.dss-btn-danger:hover:not(:disabled) {
+  color: var(--dss-danger-ink);
+  background: color-mix(in srgb, var(--dsw-alias-state-error-primary) 8%, transparent);
+}
+.dss-icon-btn { width: 32px; height: 32px; padding: 0; border-radius: 8px; color: var(--dsw-alias-label-secondary); }
+.dss-icon-btn:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--dsw-alias-label-primary) 6%, var(--dsw-alias-bg-layer-1));
+  color: var(--dsw-alias-label-primary);
+}
+.dss-seg {
+  display: inline-flex; align-items: center; justify-content: center; height: 32px; padding: 0 12px;
+  border: 1px solid color-mix(in srgb, var(--dsw-alias-label-primary) 8%, transparent);
+  border-radius: 8px; background: transparent; color: var(--dsw-alias-label-secondary);
+  font-size: 13px; line-height: 18px; cursor: pointer;
+  transition: background-color .12s ${EASE}, border-color .12s ${EASE}, color .12s ${EASE};
+}
+.dss-seg:hover { background: color-mix(in srgb, var(--dsw-alias-label-primary) 6%, transparent); color: var(--dsw-alias-label-primary); }
+.dss-seg[aria-pressed="true"] {
+  background: color-mix(in srgb, var(--dsw-alias-label-primary) 6%, transparent);
+  border-color: color-mix(in srgb, var(--dsw-alias-label-primary) 20%, transparent);
+  color: var(--dsw-alias-label-primary); font-weight: 500;
+}
+.dss-tab {
+  display: inline-flex; align-items: center; height: 32px; padding: 0 2px; margin-bottom: -1px;
+  border: 0; border-bottom: 2px solid transparent; background: transparent;
+  color: var(--dsw-alias-label-secondary); font-size: 13px; line-height: 18px; cursor: pointer;
+  transition: color .12s ${EASE}, border-color .12s ${EASE};
+}
+.dss-tab:hover { color: var(--dsw-alias-label-primary); }
+.dss-tab[aria-current="page"] {
+  color: var(--dsw-alias-label-primary); border-bottom-color: var(--dsw-static-deepseek-500); font-weight: 500;
+}
+.dss-input {
+  width: 100%; height: 36px; padding: 0 12px;
+  border: 1px solid color-mix(in srgb, var(--dsw-alias-label-primary) 12%, transparent);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--dsw-alias-label-primary) 3%, var(--dsw-alias-bg-layer-1));
+  color: var(--dsw-alias-label-primary); font-size: 14px; line-height: 20px;
+  transition: border-color .12s ${EASE}, background-color .12s ${EASE};
+}
+.dss-input:hover { border-color: color-mix(in srgb, var(--dsw-alias-label-primary) 18%, transparent); }
+.dss-input:focus { border-color: var(--dsw-static-deepseek-500); }
+.dss-input::placeholder { color: var(--dsw-alias-label-secondary); }
+.dss-input:disabled { opacity: .4; cursor: default; }
+textarea.dss-input { height: auto; min-height: 96px; padding: 8px 12px; resize: vertical; }
+select.dss-input { appearance: none; -webkit-appearance: none; padding-right: 36px; cursor: pointer; }
+select.dss-select-sm { height: 32px; padding: 0 28px 0 8px; font-size: 13px; }
+.dss-root input[type="number"] { -moz-appearance: textfield; appearance: textfield; }
+.dss-root input[type="number"]::-webkit-outer-spin-button,
+.dss-root input[type="number"]::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+.dss-row { transition: background-color .12s ${EASE}; }
+.dss-row:hover { background: color-mix(in srgb, var(--dsw-alias-label-primary) 6%, var(--dsw-alias-bg-layer-1)); }
+.dss-switch {
+  position: relative; display: inline-block; width: 36px; height: 20px; flex: none;
+  padding: 0; border: 1px solid color-mix(in srgb, var(--dsw-alias-label-primary) 20%, transparent);
+  border-radius: 10px; background: transparent; cursor: pointer;
+  transition: background-color .12s ${EASE}, border-color .12s ${EASE};
+}
+.dss-switch::after {
+  content: ""; position: absolute; left: 1px; top: 1px; width: 16px; height: 16px; border-radius: 50%;
+  background: var(--dsw-alias-label-secondary);
+  transition: transform .12s ${EASE}, background-color .12s ${EASE};
+}
+.dss-switch[aria-checked="true"] {
+  background: var(--dsw-alias-brand-primary);
+  border-color: var(--dsw-alias-brand-primary);
+}
+.dss-switch[aria-checked="true"]::after {
+  transform: translateX(16px);
+  background: var(--dsw-alias-bg-base);
+}
+.dss-switch:hover { border-color: color-mix(in srgb, var(--dsw-alias-label-primary) 36%, transparent); }
+.dss-chip {
+  display: inline-flex; align-items: center; gap: 4px; max-width: 100%;
+  padding: 2px 2px 2px 8px; border: 1px solid var(--dsw-alias-border-l2); border-radius: 6px;
+  background: var(--dsw-alias-bg-layer-1); color: var(--dsw-alias-label-secondary);
+  font-size: 12px; line-height: 16px;
+}
+.dss-chip-remove {
+  display: inline-flex; align-items: center; justify-content: center; width: 20px; height: 20px;
+  padding: 0; border: 0; border-radius: 4px; background: transparent;
+  color: var(--dsw-alias-label-secondary); cursor: pointer;
+}
+.dss-chip-remove:hover { background: color-mix(in srgb, var(--dsw-alias-label-primary) 8%, transparent); color: var(--dsw-alias-label-primary); }
+.dss-view { animation: dss-view-in .16s ${EASE} both; }
+@keyframes dss-view-in { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
+@media (prefers-reduced-motion: reduce) {
+  .dss-root *, .dss-root *::before, .dss-root *::after {
+    animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important;
+  }
+  .dss-btn:active:not(:disabled) { transform: none; }
+  .dss-view { animation: none !important; }
+}
+`
 
 const TRIGGER_TYPES: TaskType[] = ['cron', 'once', 'interval']
 
@@ -163,6 +337,8 @@ export function SchedulerPanel({ onClose, embedded = false, t, sessions, workspa
   const [view, setView] = useState<View>('list')
   const [tasks, setTasks] = useState<TaskView[]>([])
   const [history, setHistory] = useState<HistoryEntry[]>([])
+  /** Display-only: the task whose history is open, used for the history title. */
+  const [histTaskName, setHistTaskName] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [runningTaskId, setRunningTaskId] = useState<string | null>(null)
@@ -311,14 +487,14 @@ export function SchedulerPanel({ onClose, embedded = false, t, sessions, workspa
     setEditId(task.id); setName(task.name); setType(task.type); setCron(task.cron); setRunAt(task.type === 'once' && task.runAt ? toLocalInput(task.runAt) : ''); setEveryMinutes(task.everyMinutes ?? 60); setCwd(task.cwd ?? ''); setPrompt(task.prompt ?? ''); setExecutionKind(task.executionKind); setWorkflowId(task.workflowId ?? ''); setWorkflowTitle(task.workflowTitle ?? ''); setWorkflowDescription(task.workflowDescription ?? ''); setWorkflowStoryCode(task.workflowStoryCode ?? ''); setWorkflowPathInputs(task.workflowPathInputs ?? {}); setWorkflowAttachments(task.workflowAttachments ?? []); setAttachError(null); if (task.executionKind === 'knj-workflow') void loadWorkflows(); setEnabled(task.enabled); setError(null); setRunNotice(null); setCronChecked(false); setUpcoming([]); setView('form')
   }
 
-/** Human-readable byte size for attachment chips. */
-function formatBytes(size: number): string {
-  if (size >= 1024 * 1024) return `${(size / 1024 / 1024).toFixed(1)} MB`
-  if (size >= 1024) return `${Math.round(size / 1024)} KB`
-  return `${size} B`
-}
+  /** Human-readable byte size for attachment chips. */
+  function formatBytes(size: number): string {
+    if (size >= 1024 * 1024) return `${(size / 1024 / 1024).toFixed(1)} MB`
+    if (size >= 1024) return `${Math.round(size / 1024)} KB`
+    return `${size} B`
+  }
 
-/** File → base64 in chunks (large files must not blow the argument stack). */
+  /** File → base64 in chunks (large files must not blow the argument stack). */
   const fileToBase64 = (file: File): Promise<string> => new Promise((resolve, reject) => {
     const reader = new FileReader()
     reader.onerror = () => reject(new Error('读取文件失败'))
@@ -368,6 +544,7 @@ function formatBytes(size: number): string {
       const res = await api.taskHistory(task.id)
       setHistory(res.history)
       setHistPage(0)
+      setHistTaskName(task.name)
       setView('history')
       setError(null)
     } catch (e) {
@@ -457,6 +634,8 @@ function formatBytes(size: number): string {
 
   const cronOk = CRON_RE.test(cron.trim())
   const triggerValid = type === 'cron' ? cronOk : type === 'once' ? runAt !== '' : Number.isInteger(everyMinutes) && everyMinutes >= 1
+  // 停用任务的预演只保留灰色刻度，不把 nextRun 画成即将触发。
+  const timesForScale = upcoming.length > 0 ? upcoming : nextRun !== null ? [nextRun] : []
   // 选中工作流声明的「文件」入参：表单据此渲染路径字段、并在提交前要求必填项非空
   const selectedWorkflowFileInputs = (workflows.find((workflow) => workflow.id === workflowId)?.inputs ?? []).filter((decl) => decl.type === 'file')
   const missingRequiredPaths = selectedWorkflowFileInputs.filter((decl) => decl.required && (workflowPathInputs[decl.name] ?? '').trim() === '')
@@ -481,377 +660,614 @@ function formatBytes(size: number): string {
   const histResult = view === 'history' ? pageSlice(history, histPage, histPageSize) : null
 
   return (
-    <div
-      style={embedded ? S.embedRoot : S.overlay}
-      onClick={embedded ? undefined : (e) => { if (e.target === e.currentTarget) onClose?.() }}
-    >
-      <div style={embedded ? S.embedPanel : S.panel}>
-        <div style={embedded ? S.embedHead : S.head}>
-          <span style={{ ...S.title, color: T.accent }}><IconClock size={17} /></span>
-          <span style={S.title}>{t('panel.title')}</span>
-          <span style={S.sub}>{t('panel.subtitle')}</span>
-          <span style={S.spacer} />
-          {!embedded && (
-            <button style={S.iconBtn} title={t('btn.close')} onClick={onClose}><IconCross /></button>
-          )}
-        </div>
-        {(view === 'list' || view === 'executions') && (
-          <div style={embedded ? S.embedTabBar : S.tabBar}>
-            <button style={{ ...S.tab, ...(view === 'list' ? S.tabOn : {}) }} onClick={() => setView('list')}>{t('tab.tasks')}</button>
-            <button style={{ ...S.tab, ...(view === 'executions' ? S.tabOn : {}) }} onClick={() => void openExecutions()}>{t('tab.executions')}</button>
-          </div>
-        )}
-        <div style={embedded ? S.embedBody : S.body} ref={bodyRef}>
-          {error !== null && <div style={S.err}><IconCross size={15} />{error}</div>}
-          {runNotice !== null && (
-            <div style={{ ...S.err, background: 'color-mix(in srgb, var(--dsw-static-green-500) 12%, transparent)', borderColor: T.success, color: T.success }}>
-              <IconCheck size={15} />{runNotice.message}
-              {runNotice.workflowTaskId !== undefined && (
-                <button type="button" style={{ ...S.btn, height: 28, padding: '0 10px', fontSize: 12, marginLeft: 'auto' }} onClick={() => window.dispatchEvent(new CustomEvent('dsh-knj-workflow:open-task', { detail: { taskId: runNotice.workflowTaskId } }))}>
-                  {t('history.openWorkflowTask')}
+    <>
+      <style>{PANEL_CSS}</style>
+      <div
+        className="dss-root"
+        style={embedded ? S.embedRoot : S.overlay}
+        onClick={embedded ? undefined : (e) => { if (e.target === e.currentTarget) onClose?.() }}
+      >
+        <div
+          style={embedded ? S.embedPanel : S.panel}
+          role={embedded ? undefined : 'dialog'}
+          aria-modal={embedded ? undefined : true}
+          aria-label={t('panel.title')}
+        >
+          <div style={embedded ? S.embedHead : S.head}>
+            {(view === 'form' || view === 'history') ? (
+              <>
+                <button type="button" className="dss-btn dss-icon-btn" aria-label={t('btn.back')} title={t('btn.back')} onClick={() => setView('list')}>
+                  <IconChevronLeft />
                 </button>
-              )}
+                <div style={S.headTitleCol}>
+                  <span style={S.title} title={view === 'history' && histTaskName !== '' ? fmt(t('history.forTask'), { name: histTaskName }) : undefined}>
+                    {view === 'form'
+                      ? (editId === null ? t('form.title.new') : t('form.title.edit'))
+                      : (histTaskName !== '' ? fmt(t('history.forTask'), { name: histTaskName }) : t('history.title'))}
+                  </span>
+                </div>
+                {view === 'history' && <span style={S.metaText}>{t('history.retention')}</span>}
+                {!embedded && (
+                  <button type="button" className="dss-btn dss-icon-btn" aria-label={t('btn.close')} title={t('btn.close')} onClick={onClose}>
+                    <IconCross />
+                  </button>
+                )}
+              </>
+            ) : (
+              <>
+                <span style={S.titleIcon}><IconClock /></span>
+                <div style={S.headTitleCol}>
+                  <span style={S.title}>{t('panel.title')}</span>
+                  <span style={S.sub}>{t('panel.subtitle')}</span>
+                </div>
+                {!embedded && (
+                  <button type="button" className="dss-btn dss-icon-btn" aria-label={t('btn.close')} title={t('btn.close')} onClick={onClose}>
+                    <IconCross />
+                  </button>
+                )}
+              </>
+            )}
+          </div>
+
+          {(view === 'list' || view === 'executions') && (
+            <div style={embedded ? S.embedTabBar : S.tabBar}>
+              <button type="button" aria-current={view === 'list' ? 'page' : undefined} className="dss-tab" onClick={() => setView('list')}>
+                {t('tab.tasks')}
+              </button>
+              <button type="button" aria-current={view === 'executions' ? 'page' : undefined} className="dss-tab" onClick={() => void openExecutions()}>
+                {t('tab.executions')}
+              </button>
             </div>
           )}
 
-          {view === 'list' && (
-            <div>
-              <div style={S.toolbar}>
-                <button style={S.btnPrimary} onClick={openNew}><IconPlus size={15} />{t('btn.new')}</button>
-                <button style={S.btn} onClick={() => void reload()}><IconRefresh size={15} />{t('btn.refresh')}</button>
+          <div style={embedded ? S.embedBody : S.body} ref={bodyRef}>
+            {error !== null && (
+              <div style={{ ...S.banner, borderColor: 'color-mix(in srgb, var(--dsw-alias-state-error-primary) 35%, transparent)', background: 'color-mix(in srgb, var(--dsw-alias-state-error-primary) 6%, transparent)' }}>
+                <span style={{ color: T.danger, display: 'inline-flex' }}><IconCross /></span>
+                <span style={{ flex: 1, minWidth: 0 }}>{error}</span>
               </div>
-              {tasks.length === 0 ? (
-                <div style={S.empty}>
-                  <span style={{ color: T.text3 }}><IconClock size={28} /></span>
-                  <div>{t('tasks.empty')}</div>
-                </div>
-              ) : (
-                tasks.map((task) => (
-                  <div key={task.id} style={S.card}>
-                    <div style={S.cardTop}>
-                      <div style={S.name} title={task.name}>{task.name}</div>
-                      <Pill ok={task.enabled}>
-                        <IconCheck size={12} />
-                        {task.enabled ? t('status.enabled') : t('status.disabled')}
-                      </Pill>
-                    </div>
-                    <div style={S.meta}>
-                      <span style={S.metaItem}><IconClock size={13} /><span style={S.cron}>{triggerText(task, t)}</span></span>
-                      <span style={S.metaItem}>{t('col.next')}：{task.enabled && task.nextRun !== null ? formatTime(task.nextRun) : t('next.unknown')}</span>
-                      {task.cwd !== undefined && task.cwd !== '' && <span style={S.metaItem}>{t('form.cwd')}：{task.cwd}</span>}
-                    </div>
-                    <div style={S.prompt} title={task.executionKind === 'knj-workflow' ? task.workflowTitle : task.prompt}>{task.executionKind === 'knj-workflow' ? `${task.workflowTitle} · ${task.workflowId}` : task.prompt}</div>
-                    <div style={S.actions}>
-                      <button style={S.btn} onClick={() => openEdit(task)}><IconEdit size={14} />{t('btn.edit')}</button>
-                      <button style={S.btn} onClick={() => void toggle(task)}>{task.enabled ? t('status.disabled') : t('status.enabled')}</button>
-                      <button style={{ ...S.btn, ...(runningTaskId === task.id ? { opacity: 0.65, cursor: 'wait' } : {}) }} onClick={() => void run(task)} disabled={runningTaskId !== null}><IconPlay size={13} />{runningTaskId === task.id ? t('run.pending') : t('btn.run')}</button>
-                      <button style={S.btn} onClick={() => void openHistory(task)}><IconHistory size={14} />{t('btn.history')}</button>
-                      <span style={S.spacer} />
-                      <button style={S.iconBtn} title={t('btn.delete')} onClick={() => void remove(task)}><IconTrash size={15} /></button>
-                    </div>
-                  </div>
-                ))
-              )}
-            </div>
-          )}
+            )}
+            {runNotice !== null && (
+              <div style={{ ...S.banner, borderColor: 'color-mix(in srgb, var(--dsw-static-green-500) 35%, transparent)', background: 'color-mix(in srgb, var(--dsw-static-green-500) 6%, transparent)' }}>
+                <span style={{ color: T.success, display: 'inline-flex' }}><IconCheck /></span>
+                <span style={{ flex: 1, minWidth: 0 }}>{runNotice.message}</span>
+                {runNotice.workflowTaskId !== undefined && (
+                  <button
+                    type="button"
+                    className="dss-btn dss-btn-sm dss-btn-ghost"
+                    onClick={() => window.dispatchEvent(new CustomEvent('dsh-knj-workflow:open-task', { detail: { taskId: runNotice.workflowTaskId } }))}
+                  >
+                    {t('history.openWorkflowTask')}
+                  </button>
+                )}
+              </div>
+            )}
 
-          {view === 'executions' && (
-            <div>
-              <div style={S.toolbar}>
-                <button style={S.btn} onClick={() => void reloadExecutions()}><IconRefresh size={15} />{t('btn.refresh')}</button>
-                <span style={S.spacer} />
-                <span style={{ ...S.sub, fontSize: 12 }}>{t('history.all.retention')}</span>
-              </div>
-              {allHistory.length === 0 ? (
-                <div style={S.empty}>{t('history.empty')}</div>
-              ) : (
-                (execResult?.rows ?? []).map((entry, index) => (
-                  <HistoryRow
-                    key={`${entry.at}-${index}`}
-                    entry={entry}
-                    t={t}
-                    name={taskNameById.get(entry.taskId) ?? entry.taskId.slice(0, 8)}
-                    onOpenSession={openSession}
-                  />
-                ))
-              )}
-            </div>
-          )}
-
-          {view === 'form' && (
-            <div style={S.formCard}>
-              <div style={S.field}>
-                <label style={S.label}>{t('form.type')}</label>
-                <div style={{ display: 'flex', gap: 8 }}>
-                  {TRIGGER_TYPES.map((tp) => (
-                    <button key={tp} style={{ ...S.seg, ...(type === tp ? S.segOn : {}) }} onClick={() => setType(tp)}>
-                      {tp === 'cron' ? t('form.type.cron') : tp === 'once' ? t('form.type.once') : t('form.type.interval')}
-                    </button>
-                  ))}
-                </div>
-              </div>
-              <div style={S.field}>
-                <label style={S.label}>{t('form.name')} *</label>
-                <input style={S.input} value={name} onChange={(e) => setName(e.target.value)} placeholder={t('form.name')} />
-              </div>
-              <div style={S.field}>
-                <label style={S.label}>{t('form.executionKind')}</label>
-                <div style={{ display: 'flex', gap: 8 }}>
-                  <button style={{ ...S.seg, ...(executionKind === 'prompt-session' ? S.segOn : {}) }} onClick={() => setExecutionKind('prompt-session')}>{t('form.promptSession')}</button>
-                  <button style={{ ...S.seg, ...(executionKind === 'knj-workflow' ? S.segOn : {}) }} onClick={() => { setExecutionKind('knj-workflow'); void loadWorkflows() }}>{t('form.workflow')}</button>
-                </div>
-              </div>
-              <div style={S.field}>
-                <label style={S.label}>{t('form.cwd')}</label>
-                <select style={{ ...S.input, height: 38 }} value={cwd} onChange={(e) => setCwd(e.target.value)}>
-                  <option value="">{t('form.cwdDefault')}</option>
-                  {cwdOptions.map((o) => <option key={o.path} value={o.path} title={o.path}>{o.title}</option>)}
-                </select>
-                <div style={{ ...S.hint, color: T.text3 }}>{t('form.cwdHint')}</div>
-              </div>
-              {type === 'cron' && (
-                <div style={S.field}>
-                  <label style={S.label}>{t('form.cron')} *</label>
-                  <div style={{ display: 'flex', gap: 8 }}>
-                    <input style={{ ...S.input, flex: 1, fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace' }} value={cron} onChange={(e) => { setCron(e.target.value); setCronChecked(false) }} placeholder={t('form.cronPlaceholder')} />
-                    <button style={S.btn} onClick={() => void checkCron()}><IconCheck size={14} />{t('btn.validate')}</button>
-                  </div>
-                  <div style={{ ...S.hint, color: cron.trim() === '' ? T.text3 : (cronOk ? T.success : T.danger) }}>
-                    {cron.trim() === '' ? t('form.cronPlaceholder') : cronOk ? t('form.cronValid') : t('form.cronInvalid')}
-                  </div>
-                  {cronChecked && cronOk && upcoming.length > 0 && (
-                    <div style={{ marginTop: 10, fontSize: 12, color: T.text2 }}>
-                      <div style={{ marginBottom: 4, color: T.text3 }}>{t('form.upcoming')}：</div>
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: 3, fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace' }}>
-                        {upcoming.map((iso) => <span key={iso}>{formatTime(iso)}</span>)}
-                      </div>
-                    </div>
+            {view === 'list' && (
+              <div key="list" className="dss-view">
+                <div style={S.toolbar}>
+                  {tasks.length > 0 && (
+                    <button type="button" className="dss-btn dss-btn-primary" onClick={openNew}><IconPlus />{t('btn.new')}</button>
                   )}
+                  <button type="button" className="dss-btn dss-btn-ghost" onClick={() => void reload()}><IconRefresh />{t('btn.refresh')}</button>
                 </div>
-              )}
-              {type === 'once' && (
-                <div style={S.field}>
-                  <label style={S.label}>{t('form.runAt')} *</label>
-                  <input type="datetime-local" style={S.input} value={runAt} onChange={(e) => setRunAt(e.target.value)} />
-                </div>
-              )}
-              {type === 'interval' && (
-                <div style={S.field}>
-                  <label style={S.label}>{t('form.everyMinutes')} *</label>
-                  <input type="number" min={1} style={S.input} value={everyMinutes} onChange={(e) => setEveryMinutes(Number(e.target.value) || 1)} />
-                </div>
-              )}
-              {executionKind === 'knj-workflow' ? (
-                <>
-                  <div style={S.field}>
-                    <label style={S.label}>{t('form.workflowSelect')} *</label>
-                    <select style={{ ...S.input, height: 38 }} value={workflowId} onChange={(e) => setWorkflowId(e.target.value)}>
-                      <option value="">{t('form.workflowSelect')}</option>
-                      {workflows.map((workflow) => <option key={workflow.id} value={workflow.id}>{workflow.name}</option>)}
-                    </select>
-                    {/* 没有声明文件入参时不该说"没入口"——附件本来就不需要声明 */}
-                    {workflowId.trim() !== '' && selectedWorkflowFileInputs.length === 0 && (
-                      <div style={{ ...S.hint, color: T.text3 }}>{t('form.workflowNoFileInputs')}</div>
-                    )}
-                  </div>
-                  <div style={S.field}>
-                    <label style={S.label}>{t('form.workflowTitle')}</label>
-                    <input style={S.input} value={workflowTitle} placeholder={t('form.workflowTitlePlaceholder')} onChange={(e) => setWorkflowTitle(e.target.value)} />
-                  </div>
-                  <div style={S.field}>
-                    <label style={S.label}>{t('form.workflowDescription')}</label>
-                    <textarea style={{ ...S.input, minHeight: 72, resize: 'vertical' }} value={workflowDescription} onChange={(e) => setWorkflowDescription(e.target.value)} />
-                  </div>
-                  <div style={S.field}>
-                    <label style={S.label}>{t('form.workflowStoryCode')}</label>
-                    <input style={S.input} value={workflowStoryCode} onChange={(e) => setWorkflowStoryCode(e.target.value)} placeholder={t('form.workflowStoryCodePlaceholder')} />
-                  </div>
-                  {/* 附件：不需要工作流声明，多选；每次触发把这份快照交给流程（节点用 ${inputs.附件} 拿路径） */}
-                  <div style={S.field}>
-                    <label style={S.label}>{t('form.workflowAttachments')}</label>
-                    <div style={{ ...S.hint, color: T.text3, marginBottom: 8 }}>{t('form.workflowAttachmentsHint')}</div>
-                    <input
-                      ref={attachInputRef}
-                      type="file"
-                      multiple
-                      style={{ display: 'none' }}
-                      onChange={onAttachmentInputChange}
-                    />
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-                      <button
-                        type="button"
-                        style={{ ...S.btn, opacity: attaching > 0 ? 0.6 : 1 }}
-                        disabled={attaching > 0}
-                        onClick={() => attachInputRef.current?.click()}
-                      >
-                        <IconPlus size={15} />
-                        {attaching > 0 ? t('form.workflowAttachmentsUploading') : t('form.workflowAttachmentsPick')}
-                      </button>
-                      <span style={{ fontSize: 12, color: T.text3 }}>
-                        {workflowAttachments.length > 0
-                          ? fmt(t('form.workflowAttachmentsCount'), { n: String(workflowAttachments.length) })
-                          : t('form.workflowAttachmentsNone')}
-                      </span>
-                    </div>
-                    {workflowAttachments.length > 0 && (
-                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 8 }}>
-                        {workflowAttachments.map((att, index) => (
-                          <span key={att.uploadId} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12, color: T.text2, border: `1px solid ${T.border}`, borderRadius: 999, padding: '3px 6px 3px 10px' }}>
-                            {att.name}{att.size === undefined ? '' : ` (${formatBytes(att.size)})`}
+                {tasks.length === 0 ? (
+                  <EmptyState
+                    dial
+                    title={t('tasks.empty')}
+                    hint={t('tasks.emptyHint')}
+                    action={<button type="button" className="dss-btn dss-btn-primary" onClick={openNew}><IconPlus />{t('btn.new')}</button>}
+                  />
+                ) : (
+                  <div style={S.taskList}>
+                    {tasks.map((task, index) => {
+                      const workflow = task.executionKind === 'knj-workflow'
+                      const taskSummary = workflow
+                        ? (task.workflowTitle !== undefined && task.workflowTitle !== '' ? task.workflowTitle : '—')
+                        : (task.prompt !== undefined && task.prompt !== '' ? task.prompt : '—')
+                      return (
+                        <div
+                          key={task.id}
+                          className="dss-row"
+                          style={{ ...S.taskRow, ...(index > 0 ? { borderTop: `1px solid ${T.hairline}` } : {}) }}
+                        >
+                          <div style={S.taskHead}>
+                            <div style={S.taskIdentity}>
+                              <span style={S.taskName} title={task.name}>{task.name}</span>
+                              {task.cwd !== undefined && task.cwd !== '' && (
+                                <span style={S.taskCwd} title={task.cwd}>{t('form.cwd')}：{baseName(task.cwd)}</span>
+                              )}
+                            </div>
+                            <Switch
+                              checked={task.enabled}
+                              onChange={() => void toggle(task)}
+                              label={`${task.name} · ${t('form.enabled')}`}
+                            />
+                          </div>
+                          <div style={S.triggerMono}>{triggerText(task, t)}</div>
+                          <DayScale
+                            times={task.enabled && task.nextRun !== null ? [task.nextRun] : []}
+                            enabled={task.enabled}
+                            label={!task.enabled
+                              ? t('history.disabledTask')
+                              : task.nextRun !== null
+                                ? `${t('list.next')} ${fmtSchedule(task.nextRun)}`
+                                : t('form.nextRunEmpty')}
+                          />
+                          <p style={S.summary} title={taskSummary}>{taskSummary}</p>
+                          <div style={S.taskActions}>
+                            <button type="button" className="dss-btn dss-btn-sm dss-btn-ghost" onClick={() => openEdit(task)}><IconEdit />{t('btn.edit')}</button>
                             <button
                               type="button"
-                              title={t('btn.remove')}
-                              style={{ border: 0, background: 'transparent', color: T.text3, cursor: 'pointer', fontSize: 12, lineHeight: 1, padding: '2px 4px' }}
-                              onClick={() => removeAttachment(index)}
+                              className="dss-btn dss-btn-sm dss-btn-outline"
+                              style={runningTaskId === task.id ? { opacity: 0.65 } : undefined}
+                              onClick={() => void run(task)}
+                              disabled={runningTaskId !== null}
                             >
-                              <IconCross size={12} />
+                              <IconPlay />{runningTaskId === task.id ? t('run.pending') : t('btn.run')}
                             </button>
-                          </span>
-                        ))}
-                      </div>
-                    )}
-                    {attachError !== null && (
-                      <div style={{ ...S.hint, color: T.danger, marginTop: 6 }}>{t('form.workflowAttachmentsFailed')}{attachError}</div>
-                    )}
-                  </div>
-                  {selectedWorkflowFileInputs.length > 0 && (
-                    <div style={S.field}>
-                      <label style={S.label}>{t('form.workflowPathInputs')}</label>
-                      <div style={{ ...S.hint, color: T.text3, marginBottom: 8 }}>{t('form.workflowPathInputsHint')}</div>
-                      {selectedWorkflowFileInputs.map((decl) => (
-                        <div key={decl.name} style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
-                          <span style={{ fontSize: 12, color: T.text2, minWidth: 110 }}>
-                            {decl.label || decl.name}{decl.required ? ' *' : ''}
-                          </span>
-                          <input
-                            style={{ ...S.input, flex: 1 }}
-                            value={workflowPathInputs[decl.name] ?? ''}
-                            placeholder={decl.required ? t('form.workflowPathRequiredPlaceholder') : t('form.workflowPathPlaceholder')}
-                            onChange={(e) => setWorkflowPathInputs({ ...workflowPathInputs, [decl.name]: e.target.value })}
-                          />
-                          <code style={{ fontSize: 11, color: T.text3 }}>{`\${inputs.${decl.name}}`}</code>
+                            <button type="button" className="dss-btn dss-btn-sm dss-btn-ghost" onClick={() => void openHistory(task)}><IconHistory />{t('btn.history')}</button>
+                            <span style={S.taskActionsEnd} />
+                            <button type="button" className="dss-btn dss-btn-sm dss-btn-danger" onClick={() => void remove(task)}>{t('btn.delete')}</button>
+                          </div>
                         </div>
+                      )
+                    })}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {view === 'executions' && (
+              <div key="executions" className="dss-view">
+                <div style={S.toolbar}>
+                  <button type="button" className="dss-btn dss-btn-ghost" onClick={() => void reloadExecutions()}><IconRefresh />{t('btn.refresh')}</button>
+                  <span style={S.spacer} />
+                  <span style={S.metaText}>{t('history.all.retention')}</span>
+                </div>
+                {allHistory.length === 0 ? (
+                  <EmptyState title={t('history.empty')} hint={t('history.emptyHint')} />
+                ) : (
+                  <div style={S.logSurface}>
+                    <div style={S.rail} aria-hidden />
+                    {(execResult?.rows ?? []).map((entry, index) => (
+                      <HistoryRow
+                        key={`${entry.at}-${index}`}
+                        entry={entry}
+                        t={t}
+                        showName
+                        name={taskNameById.get(entry.taskId) ?? entry.taskId.slice(0, 8)}
+                        divider={index > 0}
+                        onOpenSession={openSession}
+                      />
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {view === 'form' && (
+              <div key="form" className="dss-view">
+                <section>
+                  <div style={S.groupTitle}><span style={S.groupTick} aria-hidden />{t('form.group.task')}</div>
+                  <div style={S.field}>
+                    <div style={S.label}>{t('form.name')}<span style={S.required}> *</span></div>
+                    <input className="dss-input" value={name} onChange={(e) => setName(e.target.value)} placeholder={t('form.namePlaceholder')} aria-label={t('form.name')} />
+                  </div>
+                </section>
+
+                <section style={S.group}>
+                  <div style={S.groupTitle}><span style={S.groupTick} aria-hidden />{t('form.group.trigger')}</div>
+                  <div style={S.field}>
+                    <div style={S.label}>{t('form.type')}</div>
+                    <div style={S.segRow}>
+                      {TRIGGER_TYPES.map((tp) => (
+                        <button key={tp} type="button" className="dss-seg" aria-pressed={type === tp} onClick={() => setType(tp)}>
+                          {tp === 'cron' ? t('form.type.cron') : tp === 'once' ? t('form.type.once') : t('form.type.interval')}
+                        </button>
                       ))}
                     </div>
+                  </div>
+
+                  {type === 'cron' && (
+                    <div style={S.field}>
+                      <div style={S.label}>{t('form.cron')}<span style={S.required}> *</span></div>
+                      <div style={S.inputRow}>
+                        <input
+                          className="dss-input"
+                          style={{ flex: 1, fontFamily: MONO }}
+                          value={cron}
+                          onChange={(e) => { setCron(e.target.value); setCronChecked(false) }}
+                          placeholder={t('form.cronPlaceholder')}
+                          aria-label={t('form.cron')}
+                        />
+                        <button type="button" className="dss-btn dss-btn-outline dss-btn-field" onClick={() => void checkCron()}>
+                          <IconCheck />{t('btn.validate')}
+                        </button>
+                      </div>
+                      {cronChecked && cron.trim() !== '' && (
+                        <div style={{ ...S.hint, color: cronOk ? T.text2 : T.danger }}>{cronOk ? t('form.cronValid') : t('form.cronInvalid')}</div>
+                      )}
+                      {cronChecked && cronOk && upcoming.length > 0 && (
+                        <div style={S.upcoming}>
+                          <div style={S.upcomingLabel}>{t('form.upcoming')}</div>
+                          <div style={S.upcomingList}>
+                            {upcoming.slice(0, 4).map((iso) => <span key={iso}>{fmtSchedule(iso)}</span>)}
+                          </div>
+                        </div>
+                      )}
+                    </div>
                   )}
-                </>
-              ) : (
-                <div style={S.field}>
-                  <label style={S.label}>{t('form.prompt')} *</label>
-                  <textarea style={{ ...S.input, minHeight: 96, resize: 'vertical', lineHeight: 1.5 }} value={prompt} onChange={(e) => setPrompt(e.target.value)} placeholder={t('form.promptPlaceholder')} />
-                </div>
-              )}
-              <div style={S.field}>
-                <div style={S.nextRun}>
-                  <IconClock size={13} />
-                  <span>{t('form.nextRun')}：{triggerValid && nextRun !== null ? formatTime(nextRun) : '—'}</span>
-                </div>
+
+                  {type === 'once' && (
+                    <div style={S.field}>
+                      <div style={S.label}>{t('form.runAt')}<span style={S.required}> *</span></div>
+                      <input type="datetime-local" className="dss-input" value={runAt} onChange={(e) => setRunAt(e.target.value)} aria-label={t('form.runAt')} />
+                    </div>
+                  )}
+
+                  {type === 'interval' && (
+                    <div style={S.field}>
+                      <div style={S.label}>{t('form.everyMinutes')}<span style={S.required}> *</span></div>
+                      <input type="number" min={1} className="dss-input" value={everyMinutes} onChange={(e) => setEveryMinutes(Number(e.target.value) || 1)} aria-label={t('form.everyMinutes')} />
+                    </div>
+                  )}
+
+                  <div style={S.fieldLast}>
+                    {!enabled ? (
+                      <>
+                        <div style={S.label}>{t('form.nextRun')}</div>
+                        <div style={S.nextEmpty}>{t('form.nextRunDisabled')}</div>
+                        <DayScale times={timesForScale} enabled={false} label={t('form.dayScale')} />
+                      </>
+                    ) : type === 'cron' && cronChecked && cronOk && upcoming.length > 0 ? (
+                      <DayScale times={upcoming} enabled label={t('form.dayScale')} />
+                    ) : (
+                      <>
+                        <div style={S.label}>{t('form.nextRun')}</div>
+                        {triggerValid && nextRun !== null ? (
+                          <>
+                            <div style={S.nextValue}>{fmtSchedule(nextRun)}</div>
+                            <DayScale
+                              times={upcoming.length > 0 ? upcoming : [nextRun]}
+                              enabled
+                              label={t('form.dayScale')}
+                            />
+                          </>
+                        ) : (
+                          <div style={S.nextEmpty}>{t('form.nextRunEmpty')}</div>
+                        )}
+                      </>
+                    )}
+                  </div>
+                </section>
+
+                <section style={S.group}>
+                  <div style={S.groupTitle}><span style={S.groupTick} aria-hidden />{t('form.group.execution')}</div>
+                  <div style={S.field}>
+                    <div style={S.label}>{t('form.executionKind')}</div>
+                    <div style={S.segRow}>
+                      <button type="button" className="dss-seg" aria-pressed={executionKind === 'prompt-session'} onClick={() => setExecutionKind('prompt-session')}>{t('form.promptSession')}</button>
+                      <button type="button" className="dss-seg" aria-pressed={executionKind === 'knj-workflow'} onClick={() => { setExecutionKind('knj-workflow'); void loadWorkflows() }}>{t('form.workflow')}</button>
+                    </div>
+                  </div>
+
+                  {executionKind === 'knj-workflow' ? (
+                    <>
+                      <div style={S.field}>
+                        <div style={S.label}>{t('form.workflowSelect')}<span style={S.required}> *</span></div>
+                        <Select value={workflowId} onChange={setWorkflowId} ariaLabel={t('form.workflowSelect')}>
+                          <option value="">{t('form.workflowSelectPlaceholder')}</option>
+                          {workflows.map((workflow) => <option key={workflow.id} value={workflow.id}>{workflow.name}</option>)}
+                        </Select>
+                        {workflowId.trim() !== '' && selectedWorkflowFileInputs.length === 0 && (
+                          <>
+                            <div style={S.hint}>{t('form.workflowNoFileInputs')}</div>
+                            <details style={S.details}>
+                              <summary style={S.detailSummary}>{t('form.workflowNoFileInputsDetailsLabel')}</summary>
+                              <p style={S.detailText}>{t('form.workflowNoFileInputsDetails')}</p>
+                            </details>
+                          </>
+                        )}
+                      </div>
+                      <div style={S.field}>
+                        <div style={S.label}>{t('form.workflowTitle')}<span style={S.required}> *</span></div>
+                        <input className="dss-input" value={workflowTitle} placeholder={t('form.workflowTitlePlaceholder')} onChange={(e) => setWorkflowTitle(e.target.value)} aria-label={t('form.workflowTitle')} />
+                      </div>
+                      <div style={S.field}>
+                        <div style={S.label}>{t('form.workflowDescription')}</div>
+                        <textarea className="dss-input" style={{ minHeight: 72 }} value={workflowDescription} onChange={(e) => setWorkflowDescription(e.target.value)} aria-label={t('form.workflowDescription')} />
+                      </div>
+                      <div style={S.field}>
+                        <div style={S.label}>{t('form.workflowStoryCode')}</div>
+                        <input className="dss-input" value={workflowStoryCode} onChange={(e) => setWorkflowStoryCode(e.target.value)} placeholder={t('form.workflowStoryCodePlaceholder')} aria-label={t('form.workflowStoryCode')} />
+                      </div>
+
+                      <div style={S.field}>
+                        <div style={S.label}>{t('form.workflowAttachments')}</div>
+                        <div style={S.hint}>{t('form.workflowAttachmentsHint')}</div>
+                        <details style={S.details}>
+                          <summary style={S.detailSummary}>{t('form.workflowDetails')}</summary>
+                          <p style={S.detailText}>{t('form.workflowAttachmentsDetails')}</p>
+                        </details>
+                        <input ref={attachInputRef} type="file" multiple style={{ display: 'none' }} onChange={onAttachmentInputChange} />
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginTop: 12 }}>
+                          <button type="button" className="dss-btn dss-btn-outline" disabled={attaching > 0} onClick={() => attachInputRef.current?.click()}>
+                            <IconPlus />{attaching > 0 ? t('form.workflowAttachmentsUploading') : t('form.workflowAttachmentsPick')}
+                          </button>
+                          <span style={S.metaText}>
+                            {workflowAttachments.length > 0
+                              ? fmt(t('form.workflowAttachmentsCount'), { n: String(workflowAttachments.length) })
+                              : t('form.workflowAttachmentsNone')}
+                          </span>
+                        </div>
+                        {workflowAttachments.length > 0 && (
+                          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 8 }}>
+                            {workflowAttachments.map((att, index) => (
+                              <span key={att.uploadId} className="dss-chip">
+                                <span style={S.chipName} title={att.name}>{att.name}{att.size === undefined ? '' : ` (${formatBytes(att.size)})`}</span>
+                                <button
+                                  type="button"
+                                  className="dss-chip-remove"
+                                  aria-label={`${t('btn.remove')} ${att.name}`}
+                                  title={t('btn.remove')}
+                                  onClick={() => removeAttachment(index)}
+                                >
+                                  <IconCross />
+                                </button>
+                              </span>
+                            ))}
+                          </div>
+                        )}
+                        {attachError !== null && (
+                          <div style={S.errorText}>{t('form.workflowAttachmentsFailed')}{attachError}</div>
+                        )}
+                      </div>
+
+                      {selectedWorkflowFileInputs.length > 0 && (
+                        <div style={S.field}>
+                          <div style={S.label}>{t('form.workflowPathInputs')}</div>
+                          <div style={S.hint}>{t('form.workflowPathInputsHint')}</div>
+                          <div style={{ marginTop: 12 }}>
+                            {selectedWorkflowFileInputs.map((decl) => (
+                              <div key={decl.name} style={S.pathRow}>
+                                <span style={S.pathName} title={decl.name}>{decl.label || decl.name}{decl.required ? ' *' : ''}</span>
+                                <input
+                                  className="dss-input"
+                                  value={workflowPathInputs[decl.name] ?? ''}
+                                  placeholder={decl.required ? t('form.workflowPathRequiredPlaceholder') : t('form.workflowPathPlaceholder')}
+                                  aria-label={decl.label || decl.name}
+                                  onChange={(e) => setWorkflowPathInputs({ ...workflowPathInputs, [decl.name]: e.target.value })}
+                                />
+                                <code style={S.code}>{`\${inputs.${decl.name}}`}</code>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </>
+                  ) : (
+                    <div style={S.field}>
+                      <div style={S.label}>{t('form.prompt')}<span style={S.required}> *</span></div>
+                      <textarea className="dss-input" style={{ minHeight: 96 }} value={prompt} onChange={(e) => setPrompt(e.target.value)} placeholder={t('form.promptPlaceholder')} aria-label={t('form.prompt')} />
+                      <div style={S.hint}>{t('form.promptHint')}</div>
+                    </div>
+                  )}
+                </section>
+
+                <section style={{ ...S.group, marginBottom: 0 }}>
+                  <div style={S.groupTitle}><span style={S.groupTick} aria-hidden />{t('form.group.runtime')}</div>
+                  <div style={S.field}>
+                    <div style={S.label}>{t('form.cwd')}{executionKind === 'knj-workflow' && <span style={S.required}> *</span>}</div>
+                    <Select value={cwd} onChange={setCwd} ariaLabel={t('form.cwd')}>
+                      <option value="">{t('form.cwdDefault')}</option>
+                      {cwdOptions.map((option) => <option key={option.path} value={option.path} title={option.path}>{option.title}</option>)}
+                    </Select>
+                    <div style={S.hint}>{t('form.cwdHint')}</div>
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <Switch checked={enabled} onChange={() => setEnabled((value) => !value)} label={t('form.enabled')} />
+                    <span style={S.switchLabel}>{t('form.enabled')}</span>
+                  </div>
+                </section>
               </div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 18 }}>
-                <input type="checkbox" checked={enabled} onChange={(e) => setEnabled(e.target.checked)} />
-                <span style={{ fontSize: 13, color: T.text2 }}>{t('form.enabled')}</span>
+            )}
+
+            {view === 'history' && (
+              <div key="history" className="dss-view">
+                {history.length === 0 ? (
+                  <EmptyState title={t('history.emptyForTask')} hint={t('history.emptyHint')} />
+                ) : (
+                  <div style={S.logSurface}>
+                    <div style={S.rail} aria-hidden />
+                    {(histResult?.rows ?? []).map((entry, index) => (
+                      <HistoryRow
+                        key={`${entry.at}-${index}`}
+                        entry={entry}
+                        t={t}
+                        divider={index > 0}
+                        onOpenSession={openSession}
+                      />
+                    ))}
+                  </div>
+                )}
               </div>
-              <div style={S.foot}>
-                <button style={S.btn} onClick={() => setView('list')} disabled={busy}>{t('btn.cancel')}</button>
-                <button style={S.btnPrimary} onClick={() => void save()} disabled={busy || name.trim() === '' || !executionValid || !triggerValid}>
-                  {t('btn.save')}
-                </button>
-              </div>
+            )}
+          </div>
+
+          {view === 'form' && (
+            <div style={embedded ? S.embedFooter : S.footer}>
+              <button type="button" className="dss-btn dss-btn-ghost" onClick={() => setView('list')} disabled={busy}>{t('btn.cancel')}</button>
+              <button
+                type="button"
+                className="dss-btn dss-btn-primary"
+                onClick={() => void save()}
+                disabled={busy || name.trim() === '' || !executionValid || !triggerValid}
+              >
+                {editId === null ? t('btn.save') : t('btn.saveChanges')}
+              </button>
             </div>
           )}
 
-          {view === 'history' && (
-            <div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14 }}>
-                <button style={S.btn} onClick={() => setView('list')}><IconChevronLeft size={14} />{t('btn.back')}</button>
-                <span style={{ ...S.sub, fontSize: 12 }}>{t('history.retention')}</span>
-              </div>
-              {history.length === 0 ? (
-                <div style={S.empty}>{t('history.empty')}</div>
-              ) : (
-                (histResult?.rows ?? []).map((entry, index) => (
-                  <HistoryRow key={`${entry.at}-${index}`} entry={entry} t={t} onOpenSession={openSession} />
-                ))
-              )}
+          {(view === 'executions' && execResult !== null && allHistory.length > 0) && (
+            <div style={embedded ? S.embedPagerBar : S.pagerBar}>
+              <Pager
+                page={execResult.pageSafe}
+                pages={execResult.pages}
+                total={allHistory.length}
+                pageSize={execPageSize}
+                onPage={(p) => { setExecPage(p); scrollTop() }}
+                onPageSize={(n) => { setExecPageSize(n); setExecPage(0); scrollTop() }}
+                t={t}
+              />
+            </div>
+          )}
+          {(view === 'history' && histResult !== null && history.length > 0) && (
+            <div style={embedded ? S.embedPagerBar : S.pagerBar}>
+              <Pager
+                page={histResult.pageSafe}
+                pages={histResult.pages}
+                total={history.length}
+                pageSize={histPageSize}
+                onPage={(p) => { setHistPage(p); scrollTop() }}
+                onPageSize={(n) => { setHistPageSize(n); setHistPage(0); scrollTop() }}
+                t={t}
+              />
             </div>
           )}
         </div>
-
-        {(view === 'executions' && execResult !== null && allHistory.length > 0) && (
-          <div style={embedded ? S.embedPagerBar : S.pagerBar}>
-            <Pager
-              page={execResult.pageSafe}
-              pages={execResult.pages}
-              total={allHistory.length}
-              pageSize={execPageSize}
-              onPage={(p) => { setExecPage(p); scrollTop() }}
-              onPageSize={(n) => { setExecPageSize(n); setExecPage(0); scrollTop() }}
-              t={t}
-            />
-          </div>
-        )}
-        {(view === 'history' && histResult !== null && history.length > 0) && (
-          <div style={embedded ? S.embedPagerBar : S.pagerBar}>
-            <Pager
-              page={histResult.pageSafe}
-              pages={histResult.pages}
-              total={history.length}
-              pageSize={histPageSize}
-              onPage={(p) => { setHistPage(p); scrollTop() }}
-              onPageSize={(n) => { setHistPageSize(n); setHistPage(0); scrollTop() }}
-              t={t}
-            />
-          </div>
-        )}
       </div>
+    </>
+  )
+}
+
+/** 24-hour ruler: one tick every hour, a taller tick every 6 hours, a cobalt mark per run. */
+function DayScale({ times, enabled, label }: { times: string[]; enabled: boolean; label: string }) {
+  const marks = enabled ? times.map(clockMark).filter((mark): mark is number => mark !== null) : []
+  const tickColor = enabled ? T.tick : T.hairline
+  return (
+    <div style={S.dayScale}>
+      <div style={S.dayScaleLabel}>{label}</div>
+      <div style={S.dayTrack} aria-hidden>
+        <div style={{ ...S.dayBaseline, opacity: enabled ? 1 : 0.5 }} />
+        {Array.from({ length: 25 }, (_, hour) => (
+          <span
+            key={hour}
+            style={{
+              ...S.dayTick,
+              left: `${(hour / 24) * 100}%`,
+              height: hour % 6 === 0 ? 8 : 4,
+              background: tickColor,
+            }}
+          />
+        ))}
+        {marks.map((mark, index) => (
+          <span key={`${mark}-${index}`} style={{ ...S.dayMarkerWrap, left: `${mark * 100}%` }}>
+            <span style={S.dayMarkerBar} />
+            <span style={S.dayMarkerDot} />
+          </span>
+        ))}
+      </div>
+      <div style={S.dayLabels} aria-hidden><span>0</span><span>6</span><span>12</span><span>18</span><span>24</span></div>
+    </div>
+  )
+}
+
+/** Drawn dial for the empty state: 24 ticks, three cobalt signal ticks. */
+function Dial() {
+  const ticks = Array.from({ length: 24 }, (_, index) => {
+    const angle = (index / 24) * Math.PI * 2 - Math.PI / 2
+    const major = index % 6 === 0
+    const inner = major ? 23 : 25
+    return {
+      index,
+      x1: 32 + Math.cos(angle) * inner,
+      y1: 32 + Math.sin(angle) * inner,
+      x2: 32 + Math.cos(angle) * 29,
+      y2: 32 + Math.sin(angle) * 29,
+      signal: index % 8 === 3,
+    }
+  })
+  return (
+    <svg width={64} height={64} viewBox="0 0 64 64" aria-hidden style={{ display: 'block' }}>
+      <circle cx={32} cy={32} r={30} fill="none" stroke={T.hairline} strokeWidth={1} />
+      {ticks.map((tick) => (
+        <line
+          key={tick.index}
+          x1={tick.x1}
+          y1={tick.y1}
+          x2={tick.x2}
+          y2={tick.y2}
+          stroke={tick.signal ? T.signal : T.tick}
+          strokeWidth={tick.index % 6 === 0 ? 1.5 : 1}
+          strokeLinecap="round"
+        />
+      ))}
+      <circle cx={32} cy={32} r={2.5} fill={T.signal} />
+    </svg>
+  )
+}
+
+function EmptyState({ title, hint, action, dial = false }: { title: string; hint: string; action?: ReactNode; dial?: boolean }) {
+  return (
+    <div style={S.empty}>
+      {dial && <Dial />}
+      <div style={S.emptyTitle}>{title}</div>
+      <div style={S.emptyHint}>{hint}</div>
+      {action !== undefined && <div style={S.emptyAction}>{action}</div>}
     </div>
   )
 }
 
 /** Shared history row used by both the executions list and the per-task history view. */
-function HistoryRow({ entry, name, t, onOpenSession }: { entry: HistoryEntry; name?: ReactNode; t: (key: keyof Dict) => string; onOpenSession?: (sessionId: string) => void }) {
+function HistoryRow({ entry, name, t, divider = false, showName = false, onOpenSession }: {
+  entry: HistoryEntry
+  name?: ReactNode
+  t: (key: keyof Dict) => string
+  divider?: boolean
+  showName?: boolean
+  onOpenSession?: (sessionId: string) => void
+}) {
   const running = entry.status === 'running'
   const ok = entry.status === 'created'
   const fail = entry.status === 'failed'
-  const iconColor = running ? T.accent : ok ? T.success : fail ? T.danger : T.warn
+  const dotColor = running ? T.signal : ok ? T.success : fail ? T.danger : T.text2
   const statusText = running
     ? t('status.running')
     : ok
       ? t('status.created')
       : fail
-        ? `${t('status.failed')}${entry.error !== undefined ? `: ${entry.error}` : ''}`
+        ? t('status.failed')
         : t('status.skipped')
+  const columns = showName ? 'minmax(0,1fr) 124px 64px 56px auto' : '140px minmax(0,1fr) 72px auto'
   return (
-    <div style={S.row}>
-      <span style={{ color: iconColor, display: 'inline-flex' }}>
-        {running ? <IconClock size={14} /> : ok ? <IconCheck size={14} /> : fail ? <IconCross size={14} /> : <IconClock size={14} />}
+    <div
+      className="dss-row"
+      style={{ ...S.logRow, gridTemplateColumns: columns, ...(divider ? { borderTop: `1px solid ${T.hairline}` } : {}) }}
+    >
+      <span style={{ ...S.logDot, background: dotColor }} aria-hidden />
+      {showName && name !== undefined && (
+        <span style={S.logName} title={typeof name === 'string' ? name : undefined}>{name}</span>
+      )}
+      <span style={S.logTime} title={fullTime(entry.at)}>{fmtLogTime(entry.at)}</span>
+      <span style={S.logStatus} title={fail && entry.error !== undefined ? entry.error : statusText}>{statusText}</span>
+      <span style={S.logDuration}>{entry.ms !== undefined ? `${entry.ms} ms` : '—'}</span>
+      <span style={S.logActions}>
+        {!running && entry.workflowTaskId !== undefined && (
+          <button
+            type="button"
+            className="dss-btn dss-btn-sm dss-btn-ghost"
+            onClick={() => window.dispatchEvent(new CustomEvent('dsh-knj-workflow:open-task', { detail: { taskId: entry.workflowTaskId } }))}
+          >
+            {t('history.openWorkflowTask')}
+          </button>
+        )}
+        {!running && entry.sessionId !== undefined && onOpenSession !== undefined && (
+          <button type="button" className="dss-btn dss-btn-sm dss-btn-ghost" onClick={() => onOpenSession(entry.sessionId as string)}>
+            {t('history.openSession')}
+          </button>
+        )}
       </span>
-      {name !== undefined && (
-        <span style={{ fontSize: 13, fontWeight: 500, maxWidth: 180, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-          {name}
-        </span>
-      )}
-      <span style={{ ...S.sub, minWidth: 140 }}>{formatTime(entry.at)}</span>
-      <span style={{ flex: 1, fontSize: 13 }}>{statusText}</span>
-      <span style={{ ...S.sub, fontSize: 12, flexShrink: 0 }}>{entry.ms !== undefined ? `${entry.ms}ms` : '—'}</span>
-      {!running && entry.workflowTaskId !== undefined && (
-        <button
-          type="button"
-          style={{ ...S.btn, height: 28, padding: '0 10px', fontSize: 12, flexShrink: 0, whiteSpace: 'nowrap' }}
-          onClick={() => window.dispatchEvent(new CustomEvent('dsh-knj-workflow:open-task', { detail: { taskId: entry.workflowTaskId } }))}
-        >
-          {t('history.openWorkflowTask')}
-        </button>
-      )}
-      {!running && entry.sessionId !== undefined && onOpenSession !== undefined && (
-        <button
-          type="button"
-          style={{ ...S.btn, height: 28, padding: '0 10px', fontSize: 12, flexShrink: 0, whiteSpace: 'nowrap' }}
-          onClick={() => onOpenSession(entry.sessionId as string)}
-        >
-          {t('history.openSession')}
-        </button>
-      )}
     </div>
   )
 }
@@ -870,34 +1286,91 @@ function Pager({ page, pages, total, pageSize, onPage, onPageSize, t }: {
   const first = page <= 0
   const last = page >= pages - 1
   return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 10, justifyContent: 'center', flexWrap: 'wrap' }}>
-      <button style={{ ...S.btn, ...(first ? { opacity: 0.45, cursor: 'default' } : {}) }} disabled={first} onClick={() => onPage(page - 1)}>
-        {t('pager.prev')}
-      </button>
-      <span style={{ fontSize: 12, color: T.text3, whiteSpace: 'nowrap' }}>
-        {fmt(t('pager.summary'), { p: page + 1, n: pages, c: total })}
-      </span>
-      <button style={{ ...S.btn, ...(last ? { opacity: 0.45, cursor: 'default' } : {}) }} disabled={last} onClick={() => onPage(page + 1)}>
-        {t('pager.next')}
-      </button>
-      <select
-        aria-label={t('pager.pageSize')}
-        value={pageSize}
-        onChange={(e) => onPageSize(Number(e.target.value))}
-        style={{ height: 32, borderRadius: 10, border: `1px solid ${T.border}`, background: T.card, color: T.text, padding: '0 8px', fontSize: 13, fontFamily: T.font }}
-      >
-        {PAGE_SIZES.map((n) => <option key={n} value={n}>{n}</option>)}
-      </select>
+    <div style={S.pager}>
+      <div style={S.pagerGroup}>
+        <button type="button" className="dss-btn dss-btn-sm dss-btn-outline" disabled={first} onClick={() => onPage(page - 1)}>
+          {t('pager.prev')}
+        </button>
+        <button type="button" className="dss-btn dss-btn-sm dss-btn-outline" disabled={last} onClick={() => onPage(page + 1)}>
+          {t('pager.next')}
+        </button>
+      </div>
+      <span style={S.pagerInfo}>{fmt(t('pager.summary'), { p: page + 1, n: pages, c: total })}</span>
+      <div style={S.pagerGroup}>
+        <Select value={String(pageSize)} onChange={(value) => onPageSize(Number(value))} ariaLabel={t('pager.pageSize')} small>
+          {PAGE_SIZES.map((size) => <option key={size} value={size}>{size}</option>)}
+        </Select>
+        <span style={S.pagerInfo}>{t('pager.pageSizeUnit')}</span>
+      </div>
     </div>
   )
 }
 
-function formatTime(iso: string): string {
-  try {
-    return new Date(iso).toLocaleString()
-  } catch {
-    return iso
-  }
+function Select({ value, onChange, ariaLabel, children, small = false }: {
+  value: string
+  onChange: (value: string) => void
+  ariaLabel: string
+  children: ReactNode
+  small?: boolean
+}) {
+  return (
+    <div style={small ? { position: 'relative', width: 64 } : S.selectWrap}>
+      <select
+        className={small ? 'dss-input dss-select-sm' : 'dss-input'}
+        value={value}
+        aria-label={ariaLabel}
+        onChange={(e) => onChange(e.target.value)}
+        style={small ? { width: '100%' } : undefined}
+      >
+        {children}
+      </select>
+      <span style={{ ...S.selectChevron, ...(small ? { right: 8 } : {}) }} aria-hidden><IconChevronDown /></span>
+    </div>
+  )
+}
+
+/** Plain switch: 36×20, 16px knob, label via aria-label (text sits beside it). */
+function Switch({ checked, onChange, label }: { checked: boolean; onChange: () => void; label: string }) {
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={checked}
+      aria-label={label}
+      className="dss-switch"
+      onClick={onChange}
+    />
+  )
+}
+
+/** 2026-11-09 09:00 — compact, stable width for lists and previews. */
+function fmtSchedule(iso: string): string {
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return iso
+  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())} ${pad2(d.getHours())}:${pad2(d.getMinutes())}`
+}
+
+/** 11-09 09:00:03 — history rows; full timestamp stays in the title attribute. */
+function fmtLogTime(iso: string): string {
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return iso
+  return `${pad2(d.getMonth() + 1)}-${pad2(d.getDate())} ${pad2(d.getHours())}:${pad2(d.getMinutes())}:${pad2(d.getSeconds())}`
+}
+
+function fullTime(iso: string): string {
+  const d = new Date(iso)
+  return Number.isNaN(d.getTime()) ? iso : d.toLocaleString()
+}
+
+/** Fraction of the day (0…1) for the 24h ruler. */
+function clockMark(iso: string): number | null {
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return null
+  return (d.getHours() * 60 + d.getMinutes()) / (24 * 60)
+}
+
+function pad2(n: number): string {
+  return String(n).padStart(2, '0')
 }
 
 /** Convert an ISO datetime to a `datetime-local` input value (local timezone). */
@@ -909,7 +1382,13 @@ function toLocalInput(iso: string): string {
 
 /** Human-readable trigger description for the list view. */
 function triggerText(task: TaskView, t: (key: keyof Dict) => string): string {
-  if (task.type === 'once') return `${t('type.once')} · ${task.runAt ? formatTime(task.runAt) : '—'}`
-  if (task.type === 'interval') return `${t('type.interval')} · ${task.everyMinutes} min`
+  if (task.type === 'once') return `${t('type.once')} · ${task.runAt ? fmtSchedule(task.runAt) : '—'}`
+  if (task.type === 'interval') return fmt(t('type.everyMinutes'), { n: task.everyMinutes ?? 0 })
   return task.cron
+}
+
+/** Last path segment for the compact working-directory line. */
+function baseName(path: string): string {
+  const parts = path.split(/[\\/]/).filter(Boolean)
+  return parts.length > 0 ? (parts[parts.length - 1] ?? path) : path
 }
